@@ -9,9 +9,12 @@ Mobile Chart-App für Rohstoffe (Gold, Silber, WTI, Brent, Erdgas, Kupfer, Weize
 
 ## Daten
 
-`scripts/fetch-data.mjs` lädt werktags nach US-Börsenschluss die Tageskurse der Front-Monat-Futures
-(Yahoo Finance, Ersatz: stooq.com) und speichert sie in `data/prices.json`. Der Workflow
-`.github/workflows/update.yml` führt das automatisch aus und veröffentlicht die Seite auf GitHub Pages.
-Kein API-Key nötig. Die Kurse sind inoffizielle, ggf. verzögerte Daten und keine Anlageberatung.
+**Live (empfohlen):** Unten auf der Seite unter „Live-Kurse (Capital.com)“ E-Mail, API-Key und Key-Passwort
+eines Capital.com-Demokontos eintragen. Die App lädt dann Tageskerzen und streamt die aktuellen Kurse.
+Die Zugangsdaten bleiben nur im Browser (localStorage) und landen nie im Repository.
 
-Lokal: `node scripts/fetch-data.mjs`, dann `npx serve .` (die Seite braucht einen Webserver, um `data/prices.json` zu laden).
+**Tageswerte im Hintergrund (optional):** `scripts/fetch-data.mjs` lädt werktags Kurse von Alpha Vantage nach
+`data/prices.json`, sofern im Repository das Secret `ALPHAVANTAGE_KEY` gesetzt ist. Ohne Key zeigt die Seite
+Beispieldaten, solange keine Live-Verbindung besteht.
+
+Alle Kurse ohne Gewähr, keine Anlageberatung.

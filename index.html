@@ -82,6 +82,21 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute
 .note label{align-self:flex-start;cursor:pointer;color:var(--fg);font-weight:600;border:1px solid var(--line);border-radius:8px;padding:6px 12px;background:var(--chip)}
 .note input{position:absolute;opacity:0;width:1px;height:1px}
 .note label:focus-within{outline:2px solid var(--accent)}
+.live{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:13px;color:var(--muted)}
+.live summary{cursor:pointer;color:var(--fg);font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+.live summary .dot{width:8px;height:8px;border-radius:50%;background:var(--line)}
+.live summary .dot.on{background:var(--up);box-shadow:0 0 0 3px color-mix(in srgb, var(--up) 25%, transparent)}
+.live summary .dot.err{background:var(--down)}
+.live form{display:grid;gap:10px;margin-top:12px}
+.live .field{display:grid;gap:4px}
+.live .field span{color:var(--fg);font-weight:500}
+.live input[type=text],.live input[type=email],.live input[type=password]{font:inherit;font-size:16px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0}
+.live input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.live .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.live button{font:inherit;font-weight:600;border-radius:8px;padding:8px 14px;cursor:pointer;border:1px solid var(--line);background:var(--chip);color:var(--fg)}
+.live button.primary{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.live .warn{border-left:3px solid var(--accent);padding-left:10px}
+#liveStatus.err{color:var(--down)} #liveStatus.ok{color:var(--up)}
 .err{color:var(--down)}
 @media (prefers-reduced-motion: reduce){*{scroll-behavior:auto}}
 </style>
@@ -140,6 +155,18 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute
     <label for="csv">CSV-Datei laden<input type="file" id="csv" accept=".csv,text/csv,text/plain"></label>
     <div id="csvMsg"></div>
   </div>
+  <details class="live" id="liveBox">
+    <summary><i class="dot" id="liveDot"></i>Live-Kurse (Capital.com)</summary>
+    <form id="liveForm" autocomplete="off">
+      <p class="warn" style="margin:0">Live-Kurse kommen über die API von Capital.com. Das sind die CFD-Kurse des Brokers, nicht die offiziellen Börsenkurse. Nutze einen API-Key deines <strong>Demokontos</strong>: Capital.com-Keys dürfen immer auch handeln. Die Zugangsdaten bleiben nur in diesem Browser auf diesem Gerät gespeichert.</p>
+      <label class="field" for="lvEmail"><span>Login-E-Mail</span><input type="email" id="lvEmail" autocomplete="username" required></label>
+      <label class="field" for="lvKey"><span>API-Key</span><input type="text" id="lvKey" autocomplete="off" spellcheck="false" required></label>
+      <label class="field" for="lvPass"><span>Passwort des API-Keys</span><input type="password" id="lvPass" autocomplete="current-password" required></label>
+      <label class="row" for="lvDemo"><input type="checkbox" id="lvDemo" checked> Demokonto (empfohlen)</label>
+      <div class="row"><button type="submit" class="primary" id="lvConnect">Verbinden</button><button type="button" id="lvOff">Trennen und Daten löschen</button></div>
+      <div id="liveStatus" role="status"></div>
+    </form>
+  </details>
 </main>
 
 <script>
@@ -489,19 +516,21 @@ $('bMeasure').onclick=()=>{measureTool=!measureTool;renderToggles()};
 
 function select(id){
   if(id==='custom'){inst=cache.custom.inst;D=cache.custom.D}
-  else{inst=COMMS.find(c=>c.id===id);D=cache[id]||(cache[id]=realSeries(id)||genSeries(inst,COMMS.indexOf(inst)))}
+  else{inst=COMMS.find(c=>c.id===id);D=cache['live_'+id]||cache[id]||(cache[id]=realSeries(id)||genSeries(inst,COMMS.indexOf(inst)))}
   if(D.unit&&D.unit!==inst.unit)inst={...inst,dec:D.c[D.n-1]>=100?2:D.c[D.n-1]>=1?3:4};
   store.set('inst',id);measure=null;hover=null;legendKey='';stopMotion();
   renderTabs();renderToggles();renderQuote();renderStats();setTf(activeTf||'6M',true);
   const real=!!D.source;
-  $('badge').textContent=id==='custom'?'Eigene Daten':real?'Echte Kurse':'Beispieldaten';
-  $('noteText').innerHTML=real
-    ?`<strong>Daten:</strong> Tageskurse des Front-Monat-Futures (${esc(D.symbol)}) von ${esc(D.source)}, automatisch aktualisiert am ${dfFull.format(Date.parse(REAL.updated))}. Beim Wechsel auf den nächsten Kontraktmonat kann der Kurs springen. Kurse können verzögert sein, keine Anlageberatung. Du kannst zusätzlich eigene Kurse als CSV laden.`
+  $('badge').textContent=id==='custom'?'Eigene Daten':D.live?'Live':real?'Echte Kurse':'Beispieldaten';
+  $('noteText').innerHTML=D.live
+    ?`<strong>Daten:</strong> Live-CFD-Kurse von Capital.com (${esc(D.symbol)}), Mittelkurs aus Geld und Brief. Tageskerzen der letzten gut 3 Jahre, die aktuelle Kerze läuft live mit. Keine Anlageberatung.`
+    :real?`<strong>Daten:</strong> ${D.closeOnly?(D.monthly?'Monatliche Schlusskurse':'Tägliche Schlusskurse'):'Tageskurse'} (${esc(D.symbol)}) von ${esc(D.source)}, automatisch aktualisiert am ${dfFull.format(Date.parse(REAL.updated))}. Kurse können verzögert sein, keine Anlageberatung. Du kannst zusätzlich eigene Kurse als CSV laden.`
     :NOTE_SAMPLE;
+  if(id!=='custom'&&LIVE.ok&&!cache['live_'+id])liveHistory(id).then(ok=>{if(ok&&inst.id===id)select(id)});
 }
 function renderQuote(){const n=D.n,c=D.c[n-1],p=D.c[n-2],ch=c/p-1;
   $('qName').textContent=inst.name;
-  $('qMeta').textContent=(D.source?(D.monthly?'Monatswerte':'Tageswerte')+' · ':(inst.sym?inst.sym+' · '+inst.ex+' · ':''))+(D.unit||inst.unit)+' · Stand '+(D.monthly?dfMY.format(D.t[n-1]):dfFull.format(D.t[n-1]));
+  $('qMeta').textContent=D.live?'Live · CFD '+D.symbol+' · Capital.com':(D.source?(D.monthly?'Monatswerte':'Tageswerte')+' · ':(inst.sym?inst.sym+' · '+inst.ex+' · ':''))+(D.unit||inst.unit)+' · Stand '+(D.monthly?dfMY.format(D.t[n-1]):dfFull.format(D.t[n-1]));
   $('qPrice').textContent=fmt(c,inst.dec);
   const q=$('qChg');q.className='chg num '+cls(ch);q.textContent=sgn(c-p,inst.dec)+'  ('+pct(ch)+')'+(D.monthly?' zum Vormonat':'');
 }
@@ -582,6 +611,89 @@ $('csv').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;co
     catch(err){msg.className='err';msg.textContent=err.message}};
   r.readAsText(f);e.target.value=''});
 
+// ---------- Live: Capital.com ----------
+const LIVE_EPICS={gold:['GOLD'],silber:['SILVER'],wti:['OIL_CRUDE'],brent:['OIL_BRENT'],gas:['NATURALGAS'],kupfer:['COPPER'],weizen:['WHEAT'],mais:['CORN'],kaffee:['COFFEEARABICA','COFFEE']};
+const LIVE_SEARCH={gold:'gold',silber:'silver',wti:'us crude',brent:'brent',gas:'natural gas',kupfer:'copper',weizen:'wheat',mais:'corn',kaffee:'coffee'};
+const LIVE={cfg:store.get('live',null),ok:false,cst:'',xst:'',base:'',stream:'',epic:{},byEpic:{},ws:null,timer:0,statsT:0};
+function liveStatus(msg,kind){const el=$('liveStatus');el.textContent=msg;el.className=kind||'';$('liveDot').className='dot'+(kind==='ok'?' on':kind==='err'?' err':'')}
+async function capFetch(path,opt={},retry=true){
+  const h={'Content-Type':'application/json','X-CAP-API-KEY':LIVE.cfg.key};if(LIVE.cst){h.CST=LIVE.cst;h['X-SECURITY-TOKEN']=LIVE.xst}
+  const r=await fetch(LIVE.base+path,{...opt,headers:h});
+  if(r.status===401&&retry&&path!=='/api/v1/session'){await capLogin();return capFetch(path,opt,false)}
+  if(!r.ok){let code='';try{code=(await r.json()).errorCode||''}catch(e){}throw new Error('HTTP '+r.status+(code?' ('+code+')':''))}
+  return r;
+}
+async function capLogin(){
+  LIVE.base=LIVE.cfg.demo?'https://demo-api-capital.backend-capital.com':'https://api-capital.backend-capital.com';LIVE.cst='';
+  const r=await capFetch('/api/v1/session',{method:'POST',body:JSON.stringify({identifier:LIVE.cfg.email,password:LIVE.cfg.pass,encryptedPassword:false})},false);
+  LIVE.cst=r.headers.get('CST')||'';LIVE.xst=r.headers.get('X-SECURITY-TOKEN')||'';
+  const j=await r.json().catch(()=>({}));LIVE.stream=j.streamingHost||'wss://api-streaming-capital.backend-capital.com/';
+  if(!LIVE.cst)throw new Error('Anmeldung ok, aber der Browser darf das Sitzungs-Token nicht lesen (CORS).');
+}
+async function resolveEpic(id){
+  if(LIVE.epic[id])return LIVE.epic[id];
+  try{const j=await(await capFetch('/api/v1/markets?epics='+LIVE_EPICS[id].join(','))).json();
+    const m=(j.marketDetails||j.markets||[]).map(x=>x.instrument||x).find(Boolean);if(m&&m.epic){LIVE.epic[id]=m.epic;return m.epic}}catch(e){}
+  const j=await(await capFetch('/api/v1/markets?searchTerm='+encodeURIComponent(LIVE_SEARCH[id]))).json();
+  const ms=j.markets||[];const m=ms.find(x=>x.instrumentType==='COMMODITIES')||ms[0];
+  if(!m)throw new Error('Kein Markt für '+LIVE_SEARCH[id]+' gefunden');LIVE.epic[id]=m.epic;return m.epic;
+}
+const mid=p=>p&&p.bid!=null&&p.ask!=null?(p.bid+p.ask)/2:(p&&(p.bid??p.ask));
+async function liveHistory(id){
+  try{
+    const epic=await resolveEpic(id);LIVE.byEpic[epic]=id;
+    const j=await(await capFetch(`/api/v1/prices/${encodeURIComponent(epic)}?resolution=DAY&max=1000`)).json();
+    const ps=(j.prices||[]).filter(p=>mid(p.closePrice)>0);if(ps.length<20)throw new Error('zu wenige Kurse');
+    const n=ps.length,arr=()=>new Float64Array(n);const d={t:[],o:arr(),h:arr(),l:arr(),c:arr()};
+    ps.forEach((p,i)=>{const t=String(p.snapshotTimeUTC||p.snapshotTime).slice(0,10);d.t.push(Date.parse(t+'T00:00:00Z'));
+      d.o[i]=mid(p.openPrice);d.c[i]=mid(p.closePrice);d.h[i]=Math.max(mid(p.highPrice)||0,d.o[i],d.c[i]);d.l[i]=Math.min(mid(p.lowPrice)||Infinity,d.o[i],d.c[i])});
+    Object.assign(d,{source:'Capital.com',symbol:epic,live:true});cache['live_'+id]=finalize(d);
+    liveSubscribe();return true;
+  }catch(e){liveStatus('Kurse für '+(COMMS.find(c=>c.id===id)||{}).name+' nicht geladen: '+e.message,'err');return false}
+}
+function liveSubscribe(){
+  const epics=Object.keys(LIVE.byEpic);if(!epics.length)return;
+  const send=()=>LIVE.ws.send(JSON.stringify({destination:'marketData.subscribe',correlationId:String(Date.now()),cst:LIVE.cst,securityToken:LIVE.xst,payload:{epics}}));
+  if(LIVE.ws&&LIVE.ws.readyState===1){send();return}
+  if(LIVE.ws&&LIVE.ws.readyState===0)return;
+  try{
+    const url=LIVE.stream.replace(/\/?$/,'/')+'connect';const ws=new WebSocket(url);LIVE.ws=ws;
+    ws.onopen=()=>{send();liveStatus('Verbunden. Kurse laufen live.','ok')};
+    ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data)}catch(e){return}if(m.destination==='quote'&&m.payload)onQuote(m.payload)};
+    ws.onclose=()=>{if(LIVE.ws===ws){LIVE.ws=null;if(LIVE.ok)setTimeout(liveSubscribe,5000)}};
+  }catch(e){liveStatus('Live-Stream nicht verfügbar: '+e.message,'err')}
+}
+function onQuote(q){
+  const id=LIVE.byEpic[q.epic],d=id&&cache['live_'+id];if(!d)return;
+  const p=q.bid!=null&&q.ofr!=null?(q.bid+q.ofr)/2:(q.bid??q.ofr);if(!(p>0))return;
+  const day=Date.parse(new Date(q.timestamp||Date.now()).toISOString().slice(0,10)+'T00:00:00Z');let n=d.n;
+  if(day>d.t[n-1]){const grow=a=>{const b=new Float64Array(n+1);b.set(a);return b};
+    d.o=grow(d.o);d.h=grow(d.h);d.l=grow(d.l);d.c=grow(d.c);d.t.push(day);d.o[n]=d.h[n]=d.l[n]=d.c[n]=p;finalize(d);n++;
+    if(D===d&&view.b>=n-2){view.a+=1;view.b+=1}}
+  const i=d.n-1;d.c[i]=p;if(p>d.h[i])d.h[i]=p;if(p<d.l[i])d.l[i]=p;
+  if(D===d){renderQuote();legendKey='';dirty();const now=Date.now();if(now-LIVE.statsT>5000){LIVE.statsT=now;renderStats()}}
+}
+async function liveConnect(){
+  if(!LIVE.cfg)return;liveStatus('Verbinde …');
+  try{await capLogin();LIVE.ok=true;liveStatus('Angemeldet, lade Kurse …');
+    clearInterval(LIVE.timer);LIVE.timer=setInterval(()=>{capFetch('/api/v1/ping').catch(()=>{});
+      if(LIVE.ws&&LIVE.ws.readyState===1)LIVE.ws.send(JSON.stringify({destination:'ping',correlationId:'p',cst:LIVE.cst,securityToken:LIVE.xst}))},5*60*1000);
+    if(inst.id!=='custom'&&await liveHistory(inst.id))select(inst.id);
+  }catch(e){LIVE.ok=false;
+    const cors=e instanceof TypeError||/CORS/.test(e.message);
+    liveStatus(cors?'Der Browser darf Capital.com nicht direkt abfragen (CORS). Dafür braucht es einen kleinen Zwischendienst.':'Anmeldung fehlgeschlagen: '+e.message+'. Prüfe E-Mail, API-Key, Passwort und ob der Key zum gewählten Konto (Demo/Live) gehört.','err')}
+}
+function liveDisconnect(){LIVE.ok=false;clearInterval(LIVE.timer);if(LIVE.ws){const w=LIVE.ws;LIVE.ws=null;try{w.close()}catch(e){}}
+  for(const k of Object.keys(cache))if(k.startsWith('live_'))delete cache[k];LIVE.epic={};LIVE.byEpic={};LIVE.cst='';}
+(function initLiveForm(){
+  const c=LIVE.cfg;if(c){$('lvEmail').value=c.email||'';$('lvKey').value=c.key||'';$('lvPass').value=c.pass||'';$('lvDemo').checked=c.demo!==false}
+  $('liveForm').addEventListener('submit',e=>{e.preventDefault();
+    LIVE.cfg={email:$('lvEmail').value.trim(),key:$('lvKey').value.trim(),pass:$('lvPass').value,demo:$('lvDemo').checked};
+    store.set('live',LIVE.cfg);liveDisconnect();liveConnect()});
+  $('lvOff').addEventListener('click',()=>{liveDisconnect();LIVE.cfg=null;try{localStorage.removeItem('rc_live')}catch(e){}
+    ['lvEmail','lvKey','lvPass'].forEach(i=>$(i).value='');liveStatus('Getrennt. Zugangsdaten gelöscht.');if(inst.id!=='custom')select(inst.id)});
+})();
+
 // ---------- Boot ----------
 function resize(){const r=wrap.getBoundingClientRect();dpr=Math.min(3,window.devicePixelRatio||1);W=r.width;H=r.height;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);dirty()}
 new ResizeObserver(resize).observe(wrap);
@@ -590,7 +702,7 @@ new MutationObserver(readColors).observe(document.documentElement,{attributes:tr
 readColors();renderTf();renderToggles();
 const NOTE_SAMPLE=$('noteText').innerHTML;
 const startId=store.get('inst','gold');
-loadReal().then(()=>{select(COMMS.some(c=>c.id===startId)?startId:'gold');resize()});
+loadReal().then(()=>{select(COMMS.some(c=>c.id===startId)?startId:'gold');resize();if(LIVE.cfg)liveConnect()});
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(dirty);
 // test hook
 window.__rc={view,get measure(){return measure},get mode(){return mode},get hover(){return hover}};
