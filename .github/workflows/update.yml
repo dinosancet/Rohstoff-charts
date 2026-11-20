@@ -30,8 +30,11 @@ jobs:
         with:
           node-version: 20
       - name: Kurse laden
+        id: fetch
+        continue-on-error: true
         run: node scripts/fetch-data.mjs
       - name: Daten speichern
+        if: steps.fetch.outcome == 'success'
         run: |
           git config user.name "kurs-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -41,7 +44,7 @@ jobs:
         run: |
           mkdir -p _site/data
           cp index.html _site/
-          cp data/prices.json _site/data/
+          if [ -f data/prices.json ]; then cp data/prices.json _site/data/; fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

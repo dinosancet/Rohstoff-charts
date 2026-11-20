@@ -18,17 +18,41 @@ const OUT = new URL('../data/prices.json', import.meta.url);
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function get(url, tries = 3) {
+let cookie = '';
+async function get(url, tries = 3, extraHeaders = {}) {
   let last;
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: '*/*' } });
+      const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: '*/*', 'Accept-Language': 'en-US,en;q=0.9', ...(cookie ? { Cookie: cookie } : {}), ...extraHeaders } });
       if (res.ok) return await res.text();
       last = new Error(`HTTP ${res.status} für ${url}`);
     } catch (e) { last = e; }
-    await sleep(1500 * (i + 1));
+    await sleep(2000 * (i + 1));
   }
   throw last;
+}
+
+// Yahoo verlangt inzwischen ein Session-Cookie plus "crumb".
+let crumb = null;
+async function yahooSession() {
+  if (crumb !== null) return crumb;
+  crumb = '';
+  for (const start of ['https://fc.yahoo.com/', 'https://finance.yahoo.com/quote/GC%3DF/']) {
+    try {
+      const res = await fetch(start, { headers: { 'User-Agent': UA, Accept: 'text/html' }, redirect: 'manual' });
+      const set = res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get('set-cookie') || ''];
+      const jar = set.map((c) => c.split(';')[0]).filter((c) => c.includes('='));
+      if (jar.length) { cookie = jar.join('; '); break; }
+    } catch (e) { console.warn('Yahoo-Cookie:', e.message); }
+  }
+  for (const host of ['query2', 'query1']) {
+    try {
+      const c = (await get(`https://${host}.finance.yahoo.com/v1/test/getcrumb`, 2)).trim();
+      if (c && c.length < 40 && !c.includes('<')) { crumb = c; break; }
+    } catch (e) { console.warn('Yahoo-Crumb:', e.message); }
+  }
+  console.log(`Yahoo-Session: Cookie ${cookie ? 'ja' : 'nein'}, Crumb ${crumb ? 'ja' : 'nein'}`);
+  return crumb;
 }
 
 const round = (v, d) => Math.round(v * 10 ** d) / 10 ** d;
@@ -48,8 +72,13 @@ function clean(rows, dec) {
 }
 
 async function fromYahoo(sym, dec) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=10y&interval=1d&includePrePost=false`;
-  const j = JSON.parse(await get(url));
+  const c = await yahooSession();
+  let j, err;
+  for (const host of ['query2', 'query1']) {
+    const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=10y&interval=1d&includePrePost=false${c ? '&crumb=' + encodeURIComponent(c) : ''}`;
+    try { j = JSON.parse(await get(url, 2)); break; } catch (e) { err = e; }
+  }
+  if (!j) throw err;
   const r = j?.chart?.result?.[0];
   if (!r) throw new Error(j?.chart?.error?.description || 'leere Antwort');
   const q = r.indicators.quote[0];
