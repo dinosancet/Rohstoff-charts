@@ -1,100 +1,58 @@
-// Lädt Tageskurse (OHLC) für alle Rohstoffe und schreibt data/prices.json.
-// Quelle 1: Yahoo Finance (kontinuierlicher Front-Monat-Future), Quelle 2: stooq.com.
-// Schlägt beides fehl, bleibt die zuletzt gespeicherte Reihe erhalten.
+// Lädt Rohstoffkurse von Alpha Vantage (kostenloser API-Key) und schreibt data/prices.json.
+// Key: Umgebungsvariable ALPHAVANTAGE_KEY (im Repository als Secret hinterlegt).
+// Gold, Silber, WTI, Brent und Erdgas gibt es täglich, Kupfer, Weizen, Mais und Kaffee nur monatlich.
+// Nur Schlusskurse, keine Kerzen. Schlägt ein Abruf fehl, bleibt die zuletzt gespeicherte Reihe erhalten.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
+const KEY = process.env.ALPHAVANTAGE_KEY;
+if (!KEY) { console.error('ALPHAVANTAGE_KEY fehlt.'); process.exit(1); }
+
 const INSTRUMENTS = [
-  { id: 'gold',   yahoo: 'GC=F', stooq: 'gc.f', dec: 2 },
-  { id: 'silber', yahoo: 'SI=F', stooq: 'si.f', dec: 3 },
-  { id: 'wti',    yahoo: 'CL=F', stooq: 'cl.f', dec: 2 },
-  { id: 'brent',  yahoo: 'BZ=F', stooq: 'cb.f', dec: 2 },
-  { id: 'gas',    yahoo: 'NG=F', stooq: 'ng.f', dec: 3 },
-  { id: 'kupfer', yahoo: 'HG=F', stooq: 'hg.f', dec: 4 },
-  { id: 'weizen', yahoo: 'ZW=F', stooq: 'zw.f', dec: 2 },
-  { id: 'mais',   yahoo: 'ZC=F', stooq: 'zc.f', dec: 2 },
-  { id: 'kaffee', yahoo: 'KC=F', stooq: 'kc.f', dec: 2 },
+  { id: 'gold',   fn: 'GOLD_SILVER_HISTORY', params: { symbol: 'XAU', interval: 'daily' }, dec: 2 },
+  { id: 'silber', fn: 'GOLD_SILVER_HISTORY', params: { symbol: 'XAG', interval: 'daily' }, dec: 3 },
+  { id: 'wti',    fn: 'WTI',         params: { interval: 'daily' },   dec: 2 },
+  { id: 'brent',  fn: 'BRENT',       params: { interval: 'daily' },   dec: 2 },
+  { id: 'gas',    fn: 'NATURAL_GAS', params: { interval: 'daily' },   dec: 3 },
+  { id: 'kupfer', fn: 'COPPER',      params: { interval: 'monthly' }, dec: 2 },
+  { id: 'weizen', fn: 'WHEAT',       params: { interval: 'monthly' }, dec: 2 },
+  { id: 'mais',   fn: 'CORN',        params: { interval: 'monthly' }, dec: 2 },
+  { id: 'kaffee', fn: 'COFFEE',      params: { interval: 'monthly' }, dec: 2 },
 ];
 const OUT = new URL('../data/prices.json', import.meta.url);
-const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-let cookie = '';
-async function get(url, tries = 3, extraHeaders = {}) {
-  let last;
-  for (let i = 0; i < tries; i++) {
-    try {
-      const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: '*/*', 'Accept-Language': 'en-US,en;q=0.9', ...(cookie ? { Cookie: cookie } : {}), ...extraHeaders } });
-      if (res.ok) return await res.text();
-      last = new Error(`HTTP ${res.status} für ${url}`);
-    } catch (e) { last = e; }
-    await sleep(2000 * (i + 1));
-  }
-  throw last;
-}
-
-// Yahoo verlangt inzwischen ein Session-Cookie plus "crumb".
-let crumb = null;
-async function yahooSession() {
-  if (crumb !== null) return crumb;
-  crumb = '';
-  for (const start of ['https://fc.yahoo.com/', 'https://finance.yahoo.com/quote/GC%3DF/']) {
-    try {
-      const res = await fetch(start, { headers: { 'User-Agent': UA, Accept: 'text/html' }, redirect: 'manual' });
-      const set = res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get('set-cookie') || ''];
-      const jar = set.map((c) => c.split(';')[0]).filter((c) => c.includes('='));
-      if (jar.length) { cookie = jar.join('; '); break; }
-    } catch (e) { console.warn('Yahoo-Cookie:', e.message); }
-  }
-  for (const host of ['query2', 'query1']) {
-    try {
-      const c = (await get(`https://${host}.finance.yahoo.com/v1/test/getcrumb`, 2)).trim();
-      if (c && c.length < 40 && !c.includes('<')) { crumb = c; break; }
-    } catch (e) { console.warn('Yahoo-Crumb:', e.message); }
-  }
-  console.log(`Yahoo-Session: Cookie ${cookie ? 'ja' : 'nein'}, Crumb ${crumb ? 'ja' : 'nein'}`);
-  return crumb;
-}
-
 const round = (v, d) => Math.round(v * 10 ** d) / 10 ** d;
 const day = (ms) => new Date(ms).toISOString().slice(0, 10);
 
-function clean(rows, dec) {
-  // rows: [YYYY-MM-DD, o, h, l, c]; sortieren, Duplikate und Lücken entfernen
+function germanUnit(u = '') {
+  const s = u.toLowerCase();
+  if (s.includes('barrel')) return 'USD je Barrel';
+  if (s.includes('mmbtu') || s.includes('million btu')) return 'USD je MMBtu';
+  if (s.includes('troy') || s.includes('ounce')) return 'USD je Feinunze';
+  if (s.includes('cent') && s.includes('pound')) return 'US-Cent je Pfund';
+  if (s.includes('pound')) return 'USD je Pfund';
+  if (s.includes('metric ton') || s.includes('tonne')) return 'USD je Tonne';
+  return u;
+}
+
+async function load(inst) {
+  const qs = new URLSearchParams({ function: inst.fn, ...inst.params, apikey: KEY });
+  const res = await fetch(`https://www.alphavantage.co/query?${qs}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const j = await res.json();
+  if (!Array.isArray(j.data)) throw new Error(j.Note || j.Information || j['Error Message'] || 'unerwartete Antwort');
+  const daily = inst.params.interval === 'daily';
+  const cutoff = day(Date.now() - (daily ? 10 : 30) * 365.25 * 864e5);
   const map = new Map();
-  for (const [t, o, h, l, c] of rows) {
-    if (!(c > 0)) continue;
-    const oo = o > 0 ? o : c, hh = h > 0 ? h : c, ll = l > 0 ? l : c;
-    map.set(t, [t, round(oo, dec), round(Math.max(hh, oo, c), dec), round(Math.min(ll, oo, c), dec), round(c, dec)]);
+  for (const p of j.data) {
+    const c = parseFloat(p.value ?? p.price ?? p.close);
+    const d = String(p.date || p.timestamp || '').slice(0, 10);
+    if (!(c > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(d) || d < cutoff) continue;
+    const v = round(c, inst.dec);
+    map.set(d, [d, v, v, v, v]);
   }
-  const out = [...map.values()].sort((a, b) => a[0].localeCompare(b[0]));
-  if (out.length < 50) throw new Error(`nur ${out.length} gültige Zeilen`);
-  return out;
-}
-
-async function fromYahoo(sym, dec) {
-  const c = await yahooSession();
-  let j, err;
-  for (const host of ['query2', 'query1']) {
-    const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=10y&interval=1d&includePrePost=false${c ? '&crumb=' + encodeURIComponent(c) : ''}`;
-    try { j = JSON.parse(await get(url, 2)); break; } catch (e) { err = e; }
-  }
-  if (!j) throw err;
-  const r = j?.chart?.result?.[0];
-  if (!r) throw new Error(j?.chart?.error?.description || 'leere Antwort');
-  const q = r.indicators.quote[0];
-  const offset = (r.meta?.gmtoffset || 0) * 1000;
-  const rows = r.timestamp.map((ts, i) => [day(ts * 1000 + offset), q.open[i], q.high[i], q.low[i], q.close[i]]);
-  return clean(rows, dec);
-}
-
-async function fromStooq(sym, dec) {
-  const csv = await get(`https://stooq.com/q/d/l/?s=${sym}&i=d`);
-  const lines = csv.trim().split(/\r?\n/);
-  if (!/^date/i.test(lines[0])) throw new Error('kein CSV: ' + lines[0].slice(0, 60));
-  const cutoff = day(Date.now() - 10 * 365.25 * 864e5);
-  const rows = lines.slice(1).map((l) => l.split(',')).filter((f) => f[0] >= cutoff)
-    .map((f) => [f[0], +f[1], +f[2], +f[3], +f[4]]);
-  return clean(rows, dec);
+  const rows = [...map.values()].sort((a, b) => a[0].localeCompare(b[0]));
+  if (rows.length < 24) throw new Error(`nur ${rows.length} gültige Werte`);
+  return { rows, unit: germanUnit(j.unit), name: j.name || inst.fn };
 }
 
 let previous = { series: {} };
@@ -102,24 +60,21 @@ try { previous = JSON.parse(await readFile(OUT, 'utf8')); } catch {}
 
 const series = {};
 let fresh = 0;
-for (const inst of INSTRUMENTS) {
-  let rows = null, source = null;
-  for (const [name, fn, sym] of [['Yahoo Finance', fromYahoo, inst.yahoo], ['stooq', fromStooq, inst.stooq]]) {
-    try { rows = await fn(sym, inst.dec); source = name; break; }
-    catch (e) { console.warn(`${inst.id}: ${name} fehlgeschlagen: ${e.message}`); }
-  }
-  if (rows) {
+for (const [k, inst] of INSTRUMENTS.entries()) {
+  if (k) await sleep(15000); // Gratis-Tarif: wenige Abrufe pro Minute
+  try {
+    const { rows, unit, name } = await load(inst);
+    series[inst.id] = { source: 'Alpha Vantage', symbol: inst.fn === 'GOLD_SILVER_HISTORY' ? inst.params.symbol : inst.fn,
+      name, interval: inst.params.interval, unit, closeOnly: true, rows };
     fresh++;
-    series[inst.id] = { source, symbol: source === 'stooq' ? inst.stooq : inst.yahoo, rows };
-    console.log(`${inst.id}: ${rows.length} Tage von ${source}, letzter ${rows.at(-1)[0]} = ${rows.at(-1)[4]}`);
-  } else if (previous.series?.[inst.id]) {
-    series[inst.id] = previous.series[inst.id];
-    console.warn(`${inst.id}: alte Daten behalten`);
+    console.log(`${inst.id}: ${rows.length} Werte (${inst.params.interval}, ${unit}), letzter ${rows.at(-1)[0]} = ${rows.at(-1)[4]}`);
+  } catch (e) {
+    console.warn(`${inst.id}: fehlgeschlagen: ${e.message}`);
+    if (previous.series?.[inst.id]) { series[inst.id] = previous.series[inst.id]; console.warn(`${inst.id}: alte Daten behalten`); }
   }
-  await sleep(800);
 }
 
-if (!fresh) { console.error('Keine einzige Reihe geladen.'); process.exit(previous.updated ? 0 : 1); }
+if (!fresh) { console.error('Keine einzige Reihe geladen.'); process.exit(1); }
 await mkdir(new URL('../data/', import.meta.url), { recursive: true });
 await writeFile(OUT, JSON.stringify({ updated: new Date().toISOString(), series }));
 console.log(`Gespeichert: ${fresh}/${INSTRUMENTS.length} Reihen aktualisiert.`);

@@ -59,6 +59,7 @@ canvas{display:block;width:100%;height:100%;touch-action:none;user-select:none;-
 .seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;padding:6px 10px;border-radius:8px;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .seg button:focus-visible{outline:2px solid var(--accent)}
+.seg button:disabled{opacity:.4;cursor:not-allowed}
 .btn.measure-on{background:var(--accent);color:#1b1407}
 .guide{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 16px;font-size:13px;color:var(--muted);margin:0;padding:0;list-style:none}
 .guide li{display:flex;gap:9px;align-items:center}
@@ -211,7 +212,7 @@ async function loadReal(){
 function realSeries(id){
   const s=REAL&&REAL.series[id];if(!s)return null;
   const rows=s.rows,n=rows.length,arr=()=>new Float64Array(n);
-  const d={t:rows.map(r=>Date.parse(r[0]+'T00:00:00Z')),o:arr(),h:arr(),l:arr(),c:arr(),source:s.source,symbol:s.symbol};
+  const d={t:rows.map(r=>Date.parse(r[0]+'T00:00:00Z')),o:arr(),h:arr(),l:arr(),c:arr(),source:s.source,symbol:s.symbol,closeOnly:!!s.closeOnly,monthly:s.interval==='monthly',unit:s.unit||''};
   rows.forEach((r,i)=>{d.o[i]=r[1];d.h[i]=r[2];d.l[i]=r[3];d.c[i]=r[4]});return finalize(d);
 }
 let inst=COMMS[0], D=null;
@@ -233,6 +234,9 @@ const barAt=x=>Math.max(0,Math.min(D.n-1,Math.round(iOf(x))));
 let C={}; function readColors(){const s=getComputedStyle(document.documentElement);for(const k of['bg','surface','fg','muted','line','grid','accent','accent-soft','up','down'])C[k]=s.getPropertyValue('--'+k).trim();dirty()}
 
 // ---------- View helpers ----------
+const effStyle=()=>D&&D.closeOnly?'line':style;
+const barsLabel=k=>D&&D.monthly?(k===1?'1 Monat':k+' Monate'):k+' Handelstage';
+function idxBefore(t){let lo=0,hi=D.n-1;if(D.t[0]>t)return -1;while(lo<hi){const m=(lo+hi+1)>>1;if(D.t[m]<=t)lo=m;else hi=m-1}return lo}
 function clampView(){
   const n=D.n; let span=view.b-view.a;
   span=Math.max(8,Math.min(span,n*1.15+10));
@@ -242,7 +246,9 @@ function clampView(){
   if(b>maxB){b=maxB;a=b-span;hit=true}
   view.a=a;view.b=b; return hit;
 }
-function tfBars(tf){const n=D.n;if(tf==='YTD'){const y=new Date(D.t[n-1]).getUTCFullYear();let i=n-1;while(i>0&&new Date(D.t[i-1]).getUTCFullYear()===y)i--;return n-i}return({'1M':21,'3M':63,'6M':126,'1J':252,'3J':756,'Max':n})[tf]}
+function tfBars(tf){const n=D.n;if(tf==='Max')return n;const last=D.t[n-1];let from;
+  if(tf==='YTD')from=Date.UTC(new Date(last).getUTCFullYear(),0,1)-1;else from=last-({'1M':30,'3M':91,'6M':182,'1J':365,'3J':1096})[tf]*864e5;
+  return Math.max(8,n-1-idxBefore(from))}
 function tfTarget(tf){const bars=Math.min(tfBars(tf),D.n);const b=D.n-0.5+Math.max(1,bars*0.04);return{a:b-bars-Math.max(1,bars*0.04),b}}
 function setTf(tf,instant){
   activeTf=tf; renderTf();
@@ -254,7 +260,7 @@ function setTf(tf,instant){
 function computeY(snap){
   const i0=Math.max(0,Math.floor(view.a)),i1=Math.min(D.n-1,Math.ceil(view.b));
   let mn=Infinity,mx=-Infinity;
-  const lineOnly=style==='line';
+  const lineOnly=effStyle()==='line';
   for(let i=i0;i<=i1;i++){const lo=lineOnly?D.c[i]:D.l[i],hi=lineOnly?D.c[i]:D.h[i];if(lo<mn)mn=lo;if(hi>mx)mx=hi}
   if(!isFinite(mn)){mn=D.c[D.n-1];mx=mn}
   const pad=(mx-mn)*0.08||mx*0.01; yT.min=mn-pad; yT.max=mx+pad*1.3;
@@ -293,7 +299,7 @@ function draw(){
     ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+pw,y);ctx.stroke();ctx.fillText(fmt(p,decAx),PAD.l+pw+8,y)}
   // time axis
   const span=view.b-view.a, i0=Math.max(0,Math.floor(view.a)), i1=Math.min(n-1,Math.ceil(view.b));
-  const level=span<=35?'w':span<=170?'m':span<=520?'q':'y';
+  const level=D.monthly?(span<=12?'m':span<=30?'q':'y'):span<=35?'w':span<=170?'m':span<=520?'q':'y';
   ctx.textAlign='center';ctx.textBaseline='alphabetic';let lastX=-1e9;
   for(let i=Math.max(1,i0);i<=i1;i++){
     const a=new Date(D.t[i-1]),b=new Date(D.t[i]);let lab=null,strong=false;
@@ -312,7 +318,7 @@ function draw(){
   if(measure){const lo=Math.min(measure.ia,measure.ib),hi=Math.max(measure.ia,measure.ib);const x1=xOf(lo),x2=xOf(hi);
     const up=D.c[hi]>=D.c[lo];ctx.fillStyle=up?hexA(C.up,.1):hexA(C.down,.1);ctx.fillRect(x1,PAD.t,x2-x1,ph)}
   const bw=pw/span, j0=Math.max(0,i0-1), j1=Math.min(n-1,i1+1);
-  if(style==='candle'&&bw>=3){
+  if(effStyle()==='candle'&&bw>=3){
     const cw=Math.max(1,Math.min(bw*0.68,18));
     for(let i=j0;i<=j1;i++){const x=xOf(i),o=D.o[i],c=D.c[i],up=c>=o;ctx.strokeStyle=ctx.fillStyle=up?C.up:C.down;
       const xx=Math.round(x)+.5;ctx.beginPath();ctx.moveTo(xx,yOf(D.h[i]));ctx.lineTo(xx,yOf(D.l[i]));ctx.stroke();
@@ -324,7 +330,7 @@ function draw(){
     ctx.lineTo(xOf(j1),PAD.t+ph);ctx.lineTo(xOf(j0),PAD.t+ph);ctx.closePath();
     const g=ctx.createLinearGradient(0,PAD.t,0,PAD.t+ph);g.addColorStop(0,hexA(col,.22));g.addColorStop(1,hexA(col,0));ctx.fillStyle=g;ctx.fill();
   }
-  if(showMa){drawLine(D.ma50,j0,j1,hexA(C.fg,.55),1.2,[]);drawLine(D.ma200,j0,j1,hexA(C.fg,.55),1.2,[5,4])}
+  if(showMa&&!D.monthly){drawLine(D.ma50,j0,j1,hexA(C.fg,.55),1.2,[]);drawLine(D.ma200,j0,j1,hexA(C.fg,.55),1.2,[5,4])}
   ctx.restore();
   // last price line + tag
   const lc=D.c[n-1],ly=yOf(lc),lup=lc>=D.c[n-2];
@@ -355,7 +361,7 @@ function drawMeasure(){
   dot(xa,ya,col,4.5);dot(xb,yb,col,4.5);
   // bubble
   ctx.font='600 15px "IBM Plex Mono", ui-monospace, monospace';
-  const txt=pct(ch),sub=(hi-lo)+' Handelstage';
+  const txt=pct(ch),sub=barsLabel(hi-lo);
   const w=Math.max(ctx.measureText(txt).width,80)+20;
   ctx.font='11px "IBM Plex Mono", ui-monospace, monospace';
   const w2=Math.max(w,ctx.measureText(sub).width+20);
@@ -380,7 +386,7 @@ function updateLegend(){
     L.innerHTML=`<span class="big num ${cls(ch)}">${pct(ch)}</span>
       <span class="num ${cls(ch)}">${sgn(b-a,dec)} ${u}</span>
       <span class="num">${dfFull.format(D.t[lo])} → ${dfFull.format(D.t[hi])}</span>
-      <span>${days} Tage · ${hi-lo} Handelstage</span>
+      <span>${days} Tage · ${barsLabel(hi-lo)}</span>
       <span class="num">Hoch <b>${fmt(mx,dec)}</b> · Tief <b>${fmt(mn,dec)}</b></span>
       <span class="num">${fmt(a,dec)} → ${fmt(b,dec)}</span>`;
     return;
@@ -389,7 +395,9 @@ function updateLegend(){
   const key=(mode==='scrub'?'s':'h')+i;if(key===legendKey)return;legendKey=key;
   L.className='legend';
   const prev=i>0?D.c[i-1]:D.o[i],ch=D.c[i]/prev-1;
-  L.innerHTML=`<span class="num"><b>${dfFull.format(D.t[i])}</b></span>
+  L.innerHTML=D.closeOnly?`<span class="num"><b>${D.monthly?dfMY.format(D.t[i]):dfFull.format(D.t[i])}</b></span>
+    <span class="num">Schluss <b>${fmt(D.c[i],dec)}</b></span>
+    <span class="num ${cls(ch)}">${pct(ch)} ${D.monthly?'zum Vormonat':'zum Vortag'}</span>`+(mode==='scrub'?'<span style="color:var(--accent)">Jetzt zweiten Finger auf den Chart setzen</span>':''):`<span class="num"><b>${dfFull.format(D.t[i])}</b></span>
     <span class="num">E <b>${fmt(D.o[i],dec)}</b></span><span class="num">H <b>${fmt(D.h[i],dec)}</b></span>
     <span class="num">T <b>${fmt(D.l[i],dec)}</b></span><span class="num">S <b>${fmt(D.c[i],dec)}</b></span>
     <span class="num ${cls(ch)}">${pct(ch)}</span>`+(mode==='scrub'?'<span style="color:var(--accent)">Jetzt zweiten Finger auf den Chart setzen</span>':'');
@@ -471,7 +479,8 @@ window.addEventListener('keydown',e=>{if(e.target.closest&&e.target.closest('inp
 function renderTabs(){const el=$('tabs');el.innerHTML='';const list=cache.custom?[...COMMS,cache.custom.inst]:COMMS;
   for(const c of list){const b=document.createElement('button');b.className='chip';b.textContent=c.name;b.setAttribute('aria-pressed',c.id===inst.id);b.onclick=()=>select(c.id);el.appendChild(b)}}
 function renderTf(){const el=$('tf');el.innerHTML='';for(const tf of['1M','3M','6M','YTD','1J','3J','Max']){const b=document.createElement('button');b.textContent=tf;b.setAttribute('aria-pressed',tf===activeTf);b.onclick=()=>setTf(tf);el.appendChild(b)}}
-function renderToggles(){$('bLine').setAttribute('aria-pressed',style==='line');$('bCandle').setAttribute('aria-pressed',style==='candle');$('bMa').setAttribute('aria-pressed',showMa);
+function renderToggles(){const es=effStyle();$('bLine').setAttribute('aria-pressed',es==='line');$('bCandle').setAttribute('aria-pressed',es==='candle');
+  $('bCandle').disabled=!!(D&&D.closeOnly);$('bCandle').title=D&&D.closeOnly?'Für diese Datenquelle gibt es nur Schlusskurse':'';$('bMa').disabled=!!(D&&D.monthly);$('bMa').setAttribute('aria-pressed',showMa);
   $('bMeasure').setAttribute('aria-pressed',measureTool);$('bMeasure').classList.toggle('measure-on',measureTool);cv.style.cursor=measureTool?'ew-resize':'crosshair'}
 $('bLine').onclick=()=>{style='line';store.set('style',style);renderToggles();computeY(true);dirty()};
 $('bCandle').onclick=()=>{style='candle';store.set('style',style);renderToggles();computeY(true);dirty()};
@@ -481,8 +490,9 @@ $('bMeasure').onclick=()=>{measureTool=!measureTool;renderToggles()};
 function select(id){
   if(id==='custom'){inst=cache.custom.inst;D=cache.custom.D}
   else{inst=COMMS.find(c=>c.id===id);D=cache[id]||(cache[id]=realSeries(id)||genSeries(inst,COMMS.indexOf(inst)))}
+  if(D.unit&&D.unit!==inst.unit)inst={...inst,dec:D.c[D.n-1]>=100?2:D.c[D.n-1]>=1?3:4};
   store.set('inst',id);measure=null;hover=null;legendKey='';stopMotion();
-  renderTabs();renderQuote();renderStats();setTf(activeTf||'6M',true);
+  renderTabs();renderToggles();renderQuote();renderStats();setTf(activeTf||'6M',true);
   const real=!!D.source;
   $('badge').textContent=id==='custom'?'Eigene Daten':real?'Echte Kurse':'Beispieldaten';
   $('noteText').innerHTML=real
@@ -491,40 +501,45 @@ function select(id){
 }
 function renderQuote(){const n=D.n,c=D.c[n-1],p=D.c[n-2],ch=c/p-1;
   $('qName').textContent=inst.name;
-  $('qMeta').textContent=(inst.sym?inst.sym+' · '+inst.ex+' · ':'')+inst.unit+' · Stand '+dfFull.format(D.t[n-1]);
+  $('qMeta').textContent=(D.source?(D.monthly?'Monatswerte':'Tageswerte')+' · ':(inst.sym?inst.sym+' · '+inst.ex+' · ':''))+(D.unit||inst.unit)+' · Stand '+(D.monthly?dfMY.format(D.t[n-1]):dfFull.format(D.t[n-1]));
   $('qPrice').textContent=fmt(c,inst.dec);
-  const q=$('qChg');q.className='chg num '+cls(ch);q.textContent=sgn(c-p,inst.dec)+'  ('+pct(ch)+')';
+  const q=$('qChg');q.className='chg num '+cls(ch);q.textContent=sgn(c-p,inst.dec)+'  ('+pct(ch)+')'+(D.monthly?' zum Vormonat':'');
 }
 function stat(label,val,sub,valCls='',extra=''){return`<div class="stat"><small>${label}</small><div class="num ${valCls}">${val}</div>${sub?`<div class="sub">${sub}</div>`:''}${extra}</div>`}
 function renderStats(){
   const n=D.n,c=D.c,last=c[n-1],dec=inst.dec,u=inst.q;
-  const back=k=>n-1-k>=0?last/c[n-1-k]-1:NaN;
+  const back=days=>{const i=idxBefore(D.t[n-1]-days*864e5);return i>=0&&i<n-1?last/c[i]-1:NaN};
   const ytd=(()=>{const y=new Date(D.t[n-1]).getUTCFullYear();for(let i=n-1;i>0;i--)if(new Date(D.t[i-1]).getUTCFullYear()<y)return last/c[i-1]-1;return NaN})();
-  const perf=[['1 Woche',back(5)],['1 Monat',back(21)],['3 Monate',back(63)],['YTD',ytd],['1 Jahr',back(252)],['3 Jahre',back(756)]];
+  const perf=[['1 Woche',D.monthly?NaN:back(7)],['1 Monat',back(D.monthly?31:30)],['3 Monate',back(91)],['YTD',ytd],['1 Jahr',back(365)],['3 Jahre',back(1096)]];
   $('perf').innerHTML=perf.map(([l,v])=>`<div><small>${l}</small><span class="num ${cls(v)}">${isNaN(v)?'–':pct(v,1)}</span></div>`).join('');
-  const w=Math.min(252,n);let hi=-Infinity,lo=Infinity;for(let i=n-w;i<n;i++){if(D.h[i]>hi)hi=D.h[i];if(D.l[i]<lo)lo=D.l[i]}
+  const w=Math.max(2,n-1-idxBefore(D.t[n-1]-365*864e5));let hi=-Infinity,lo=Infinity;for(let i=n-w;i<n;i++){if(D.h[i]>hi)hi=D.h[i];if(D.l[i]<lo)lo=D.l[i]}
   const pos=(last-lo)/(hi-lo||1);
-  const lr=[];for(let i=Math.max(1,n-30);i<n;i++)lr.push(Math.log(c[i]/c[i-1]));const m=lr.reduce((a,b)=>a+b,0)/lr.length;
-  const vol=Math.sqrt(lr.reduce((a,b)=>a+(b-m)**2,0)/(lr.length-1))*Math.sqrt(252);
+  const lr=[];for(let i=Math.max(1,n-(D.monthly?12:30));i<n;i++)lr.push(Math.log(c[i]/c[i-1]));const m=lr.reduce((a,b)=>a+b,0)/lr.length;
+  const vol=Math.sqrt(lr.reduce((a,b)=>a+(b-m)**2,0)/(lr.length-1))*Math.sqrt(D.monthly?12:252);
   let atr=0;{const p=14;let tr=[];for(let i=1;i<n;i++)tr.push(Math.max(D.h[i]-D.l[i],Math.abs(D.h[i]-c[i-1]),Math.abs(D.l[i]-c[i-1])));atr=tr.slice(0,p).reduce((a,b)=>a+b,0)/p;for(let i=p;i<tr.length;i++)atr=(atr*(p-1)+tr[i])/p}
   let rsi;{const p=14;let g=0,l=0;for(let i=1;i<=p;i++){const d=c[i]-c[i-1];d>0?g+=d:l-=d}g/=p;l/=p;for(let i=p+1;i<n;i++){const d=c[i]-c[i-1];g=(g*(p-1)+Math.max(d,0))/p;l=(l*(p-1)+Math.max(-d,0))/p}rsi=l===0?100:100-100/(1+g/l)}
   let dd=0,peak=-Infinity;for(let i=n-w;i<n;i++){if(c[i]>peak)peak=c[i];dd=Math.min(dd,c[i]/peak-1)}
   const m50=D.ma50[n-1],m200=D.ma200[n-1];
   const mult=inst.cents?inst.size/100:inst.size;
   const rsiTxt=rsi>=70?'überkauft':rsi<=30?'überverkauft':'neutral';
+  const mo=D.monthly,co=D.closeOnly;
   $('stats').innerHTML=[
     stat('52W Hoch',fmt(hi,dec),pct(last/hi-1,1)+' vom Hoch'),
     stat('52W Tief',fmt(lo,dec),pct(last/lo-1,1)+' vom Tief'),
     stat('52W Spanne',fmt(pos*100,0)+' %','Position im Jahresbereich','',`<div class="meter" aria-hidden="true"><i style="left:calc(${(pos*100).toFixed(1)}% - 1.5px)"></i></div>`),
-    stat('Volatilität 30T',fmt(vol*100,1)+' %','annualisiert'),
-    stat('ATR 14',fmt(atr,dec),u==='USc'?fmt(atr*mult,0)+' USD je Kontrakt':fmt(atr*mult,0)+' USD je Kontrakt'),
-    stat('RSI 14',fmt(rsi,1),rsiTxt,rsi>=70?'down':rsi<=30?'up':''),
-    stat('Abstand MA 50',isNaN(m50)?'–':pct(last/m50-1,1),isNaN(m50)?'':'MA '+fmt(m50,dec),isNaN(m50)?'':cls(last-m50)),
-    stat('Abstand MA 200',isNaN(m200)?'–':pct(last/m200-1,1),isNaN(m200)?'':'MA '+fmt(m200,dec),isNaN(m200)?'':cls(last-m200)),
+    stat(mo?'Volatilität 12M':'Volatilität 30T',fmt(vol*100,1)+' %','annualisiert'),
+    co?'':stat('ATR 14',fmt(atr,dec),u==='USc'?fmt(atr*mult,0)+' USD je Kontrakt':fmt(atr*mult,0)+' USD je Kontrakt'),
+    stat(mo?'RSI 14 Monate':'RSI 14',fmt(rsi,1),rsiTxt,rsi>=70?'down':rsi<=30?'up':''),
+    mo?'':stat('Abstand MA 50',isNaN(m50)?'–':pct(last/m50-1,1),isNaN(m50)?'':'MA '+fmt(m50,dec),isNaN(m50)?'':cls(last-m50)),
+    mo?'':stat('Abstand MA 200',isNaN(m200)?'–':pct(last/m200-1,1),isNaN(m200)?'':'MA '+fmt(m200,dec),isNaN(m200)?'':cls(last-m200)),
     stat('Max. Drawdown 1J',pct(dd,1),'größter Rückgang vom Hoch','down'),
-    (()=>{const t=isNaN(m200)?null:(last>m50&&m50>m200)?['Aufwärts','up','Kurs > MA 50 > MA 200']:(last<m50&&m50<m200)?['Abwärts','down','Kurs < MA 50 < MA 200']:['Seitwärts','','MA-Signale gemischt'];return t?stat('Trend',t[0],t[2],t[1]):stat('Trend','–','zu wenig Daten')})(),
+    mo?'':(()=>{const t=isNaN(m200)?null:(last>m50&&m50>m200)?['Aufwärts','up','Kurs > MA 50 > MA 200']:(last<m50&&m50<m200)?['Abwärts','down','Kurs < MA 50 < MA 200']:['Seitwärts','','MA-Signale gemischt'];return t?stat('Trend',t[0],t[2],t[1]):stat('Trend','–','zu wenig Daten')})(),
   ].join('');
-  if(inst.size){
+  const unitOk=!D.unit||D.unit===inst.unit;
+  if(inst.size&&!unitOk){
+    $('contract').innerHTML=[stat('Future',esc(inst.sym)+' · '+esc(inst.ex),'Kontraktgröße '+fmt(inst.size,0)+' '+esc(inst.sizeU)),
+      stat('Hinweis','–','Die Datenquelle liefert '+esc(D.unit)+', der Future notiert in '+esc(inst.unit)+'. Kontraktwerte deshalb ausgeblendet.')].join('');
+  }else if(inst.size){
     $('contract').innerHTML=[
       stat('Symbol / Börse',esc(inst.sym)+' · '+esc(inst.ex),'Future, Front-Monat'),
       stat('Kontraktgröße',fmt(inst.size,0)+' '+esc(inst.sizeU),esc(inst.unit)),
