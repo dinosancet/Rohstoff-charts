@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e1216" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f2f3ef" media="(prefers-color-scheme: light)">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Rohstoff-Charts</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one-column trading screen. Quote header, full-width chart canvas, controls, stats grid. */
+:root{
+  --bg:#f2f3ef; --surface:#ffffff; --fg:#151a1f; --muted:#5d6570; --line:#dcdfd8; --grid:#e8eae4;
+  --accent:#a8740f; --accent-soft:rgba(168,116,15,.13); --up:#12804a; --down:#c4362b; --chip:#e6e8e2;
+  --font-ui:"Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num:"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e1216; --surface:#151a20; --fg:#e6e9ed; --muted:#8a939d; --line:#262d35; --grid:#1c2229;
+  --accent:#e2b24c; --accent-soft:rgba(226,178,76,.15); --up:#33c276; --down:#f25b4e; --chip:#1e252d; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e1216; --surface:#151a20; --fg:#e6e9ed; --muted:#8a939d; --line:#262d35; --grid:#1c2229;
+  --accent:#e2b24c; --accent-soft:rgba(226,178,76,.15); --up:#33c276; --down:#f25b4e; --chip:#1e252d; color-scheme:dark}
+html,body{background:var(--bg);color:var(--fg)}
+body{font-family:var(--font-ui);font-size:15px;line-height:1.45;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:12px 32px;
+  -webkit-tap-highlight-color:transparent}
+main{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.num{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.up{color:var(--up)} .down{color:var(--down)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{font-weight:700;letter-spacing:.01em;font-size:15px}
+.brand span{color:var(--accent)}
+.badge{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 9px;white-space:nowrap}
+.scroller{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 -4px;padding:2px 4px}
+.scroller::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;border:1px solid transparent;background:var(--chip);color:var(--fg);font:inherit;font-size:14px;font-weight:500;
+  padding:7px 13px;border-radius:999px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.chip:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.quote{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:6px 16px}
+.quote h1{margin:0;font-size:22px;font-weight:700;text-wrap:balance}
+.quote .meta{color:var(--muted);font-size:13px}
+.price{font-size:30px;font-weight:600;line-height:1.1;text-align:right}
+.chg{font-size:14px;text-align:right}
+.legend{min-height:44px;display:flex;flex-wrap:wrap;align-items:center;gap:2px 14px;font-size:12.5px;color:var(--muted)}
+.legend b{color:var(--fg);font-weight:500}
+.legend.measure{background:var(--accent-soft);border-radius:10px;padding:6px 10px;color:var(--fg)}
+.legend .big{font-size:18px;font-weight:600}
+.chartwrap{position:relative;height:clamp(300px, 56vh, 560px);background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+canvas{display:block;width:100%;height:100%;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:crosshair}
+.controls{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center}
+.seg{display:flex;gap:2px;background:var(--chip);border-radius:10px;padding:3px}
+.seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;padding:6px 10px;border-radius:8px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.seg button:focus-visible{outline:2px solid var(--accent)}
+.btn.measure-on{background:var(--accent);color:#1b1407}
+.guide{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 16px;font-size:13px;color:var(--muted);margin:0;padding:0;list-style:none}
+.guide li{display:flex;gap:9px;align-items:center}
+.guide svg{flex:0 0 26px;height:26px;color:var(--fg)}
+.guide strong{color:var(--fg);font-weight:600}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:10px 0 0;font-weight:600}
+.perf{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.perf div{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 6px;text-align:center}
+.perf small{display:block;color:var(--muted);font-size:11.5px}
+.perf .num{font-size:14px;font-weight:600}
+@media (max-width:520px){.perf{grid-template-columns:repeat(3,1fr)}}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.stat{background:var(--surface);padding:10px 12px;min-width:0}
+.stat small{display:block;color:var(--muted);font-size:12px}
+.stat .num{font-size:16px;font-weight:600}
+.stat .sub{font-size:12px;color:var(--muted)}
+.meter{position:relative;height:6px;background:var(--chip);border-radius:3px;margin-top:7px}
+.meter i{position:absolute;top:-3px;width:3px;height:12px;border-radius:2px;background:var(--accent)}
+.note{font-size:13px;color:var(--muted);background:var(--surface);border:1px dashed var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.note label{align-self:flex-start;cursor:pointer;color:var(--fg);font-weight:600;border:1px solid var(--line);border-radius:8px;padding:6px 12px;background:var(--chip)}
+.note input{position:absolute;opacity:0;width:1px;height:1px}
+.note label:focus-within{outline:2px solid var(--accent)}
+.err{color:var(--down)}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto}}
+</style>
+
+<main>
+  <div class="top">
+    <div class="brand">Rohstoff<span>·</span>Charts</div>
+    <div class="badge" id="badge">Beispieldaten</div>
+  </div>
+
+  <div class="scroller" id="tabs" role="toolbar" aria-label="Rohstoff wählen"></div>
+
+  <section class="quote" aria-live="polite">
+    <div>
+      <h1 id="qName">Gold</h1>
+      <div class="meta" id="qMeta"></div>
+    </div>
+    <div>
+      <div class="price num" id="qPrice"></div>
+      <div class="chg num" id="qChg"></div>
+    </div>
+  </section>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="chartwrap" id="wrap"><canvas id="cv" aria-label="Kurschart. Ziehen zum Verschieben, spreizen zum Zoomen, gedrückt halten und zweiten Finger setzen zum Messen."></canvas></div>
+
+  <div class="controls">
+    <div class="seg" id="tf" role="group" aria-label="Zeitraum"></div>
+    <div class="seg" role="group" aria-label="Darstellung">
+      <button id="bLine" aria-pressed="false">Linie</button>
+      <button id="bCandle" aria-pressed="true">Kerzen</button>
+      <button id="bMa" aria-pressed="true">MA 50/200</button>
+      <button id="bMeasure" aria-pressed="false" title="Mit einem Finger ziehen misst von Start- bis Endpunkt">Messen</button>
+    </div>
+  </div>
+
+  <ul class="guide">
+    <li><svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="13" cy="13" r="4"/><path d="M3 13h5M18 13h5M6 10l-3 3 3 3M20 10l3 3-3 3"/></svg><span><strong>Ziehen</strong> verschiebt, mit Schwung</span></li>
+    <li><svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="13" r="3.2"/><circle cx="19" cy="13" r="3.2"/><path d="M1 13h2M23 13h2"/></svg><span><strong>Zwei Finger spreizen</strong> zoomt</span></li>
+    <li><svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="13" cy="13" r="4"/><circle cx="13" cy="13" r="8" stroke-dasharray="2 3"/></svg><span><strong>Gedrückt halten</strong> zeigt das Fadenkreuz</span></li>
+    <li><svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="17" r="3.2" fill="currentColor"/><circle cx="20" cy="8" r="3.2"/><path d="M8.5 15l9-5.5" stroke-dasharray="2 2"/></svg><span><strong>Halten + zweiter Finger</strong> misst % zwischen zwei Punkten</span></li>
+  </ul>
+
+  <h2>Performance</h2>
+  <div class="perf" id="perf"></div>
+
+  <h2>Kennzahlen</h2>
+  <div class="stats" id="stats"></div>
+
+  <h2>Kontrakt</h2>
+  <div class="stats" id="contract"></div>
+
+  <div class="note">
+    <div id="noteText"><strong>Hinweis:</strong> Die Kurse hier sind simulierte Beispieldaten, keine echten Marktpreise. Die Vorschau darf keine externen Kursquellen abrufen. Du kannst echte Tageskurse als CSV laden (z.&nbsp;B. Export von stooq.com, Yahoo Finance oder investing.com mit den Spalten Datum, Eröffnung, Hoch, Tief, Schluss).</div>
+    <label for="csv">CSV-Datei laden<input type="file" id="csv" accept=".csv,text/csv,text/plain"></label>
+    <div id="csvMsg"></div>
+  </div>
+</main>
+
+<script>
+(() => {
+'use strict';
+// ---------- Instruments ----------
+const COMMS = [
+  {id:'gold',  name:'Gold',        sym:'GC', ex:'COMEX',       unit:'USD je Feinunze', q:'USD', size:100,   sizeU:'Feinunzen', tick:0.10,   tickV:10,    dec:2, cents:false, vol:.16, start:1790, end:4085},
+  {id:'silber',name:'Silber',      sym:'SI', ex:'COMEX',       unit:'USD je Feinunze', q:'USD', size:5000,  sizeU:'Feinunzen', tick:0.005,  tickV:25,    dec:3, cents:false, vol:.28, start:24.5, end:50.8},
+  {id:'wti',   name:'Rohöl WTI',   sym:'CL', ex:'NYMEX',       unit:'USD je Barrel',   q:'USD', size:1000,  sizeU:'Barrel',    tick:0.01,   tickV:10,    dec:2, cents:false, vol:.34, start:78,   end:59.6},
+  {id:'brent', name:'Rohöl Brent', sym:'BZ', ex:'ICE',         unit:'USD je Barrel',   q:'USD', size:1000,  sizeU:'Barrel',    tick:0.01,   tickV:10,    dec:2, cents:false, vol:.31, start:80,   end:63.9},
+  {id:'gas',   name:'Erdgas',      sym:'NG', ex:'NYMEX',       unit:'USD je MMBtu',    q:'USD', size:10000, sizeU:'MMBtu',     tick:0.001,  tickV:10,    dec:3, cents:false, vol:.58, start:4.9,  end:4.21},
+  {id:'kupfer',name:'Kupfer',      sym:'HG', ex:'COMEX',       unit:'USD je Pfund',    q:'USD', size:25000, sizeU:'Pfund',     tick:0.0005, tickV:12.5,  dec:4, cents:false, vol:.23, start:4.42, end:5.04},
+  {id:'weizen',name:'Weizen',      sym:'ZW', ex:'CBOT',        unit:'US-Cent je Bushel',q:'USc',size:5000,  sizeU:'Bushel',    tick:0.25,   tickV:12.5,  dec:2, cents:true,  vol:.29, start:815,  end:538},
+  {id:'mais',  name:'Mais',        sym:'ZC', ex:'CBOT',        unit:'US-Cent je Bushel',q:'USc',size:5000,  sizeU:'Bushel',    tick:0.25,   tickV:12.5,  dec:2, cents:true,  vol:.24, start:575,  end:431},
+  {id:'kaffee',name:'Kaffee',      sym:'KC', ex:'ICE',         unit:'US-Cent je Pfund', q:'USc',size:37500, sizeU:'Pfund',     tick:0.05,   tickV:18.75, dec:2, cents:true,  vol:.36, start:238,  end:376},
+];
+const END_DATE = Date.UTC(2026,10,20); // Fr, 20.11.2026
+const NBARS = 1300;
+
+// ---------- Synthetic data (deterministic) ----------
+function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function gauss(r){let u=0,v=0;while(!u)u=r();while(!v)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)}
+function bizDays(n,end){const out=[];let t=end;while(out.length<n){const d=new Date(t).getUTCDay();if(d!==0&&d!==6)out.push(t);t-=86400000}return out.reverse()}
+function genSeries(c,idx){
+  const r=rng(1009*(idx+7)); const n=NBARS; const sd=c.vol/Math.sqrt(252);
+  const lr=new Float64Array(n); let s2=sd*sd, regime=0;
+  for(let i=1;i<n;i++){
+    if(i%90===0) regime=gauss(r)*sd*0.12;
+    const s=Math.sqrt(s2); let x=gauss(r)*s+regime;
+    if(r()<0.006) x+=gauss(r)*sd*4;
+    lr[i]=x; s2=sd*sd*0.06+0.86*s2+0.08*x*x; // GARCH-artig
+  }
+  const cum=new Float64Array(n); for(let i=1;i<n;i++)cum[i]=cum[i-1]+lr[i];
+  const target=Math.log(c.end/c.start), corr=(target-cum[n-1])/(n-1);
+  const t=bizDays(n,END_DATE), o=new Float64Array(n),h=new Float64Array(n),l=new Float64Array(n),cl=new Float64Array(n);
+  for(let i=0;i<n;i++){
+    cl[i]=c.start*Math.exp(cum[i]+corr*i);
+    o[i]=i?cl[i-1]*Math.exp(gauss(r)*sd*0.25):cl[i];
+    h[i]=Math.max(o[i],cl[i])*Math.exp(Math.abs(gauss(r))*sd*0.55);
+    l[i]=Math.min(o[i],cl[i])*Math.exp(-Math.abs(gauss(r))*sd*0.55);
+  }
+  return finalize({t,o,h,l,c:cl});
+}
+function sma(arr,p){const out=new Float64Array(arr.length).fill(NaN);let s=0;for(let i=0;i<arr.length;i++){s+=arr[i];if(i>=p)s-=arr[i-p];if(i>=p-1)out[i]=s/p}return out}
+function finalize(d){d.n=d.c.length;d.ma50=sma(d.c,50);d.ma200=sma(d.c,200);return d}
+
+// ---------- Formatting ----------
+const nf={}; function fmt(v,dec){const k=dec;nf[k]=nf[k]||new Intl.NumberFormat('de-DE',{minimumFractionDigits:dec,maximumFractionDigits:dec});return nf[k].format(v)}
+const pct=(v,d=2)=>(v>0?'+':v<0?'−':'±')+fmt(Math.abs(v*100),d)+' %';
+const sgn=(v,dec)=>(v>0?'+':v<0?'−':'±')+fmt(Math.abs(v),dec);
+const cls=v=>v>0?'up':v<0?'down':'';
+const dfFull=new Intl.DateTimeFormat('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'UTC'});
+const dfDM=new Intl.DateTimeFormat('de-DE',{day:'numeric',month:'short',timeZone:'UTC'});
+const dfM=new Intl.DateTimeFormat('de-DE',{month:'short',timeZone:'UTC'});
+const dfMY=new Intl.DateTimeFormat('de-DE',{month:'short',year:'2-digit',timeZone:'UTC'});
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---------- State ----------
+const store={get(k,d){try{const v=localStorage.getItem('rc_'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('rc_'+k,JSON.stringify(v))}catch(e){}}};
+const cache={};
+let REAL=null; // {updated, series:{id:{source,symbol,rows:[[YYYY-MM-DD,o,h,l,c],...]}}}
+async function loadReal(){
+  try{
+    const ctl=new AbortController();const tm=setTimeout(()=>ctl.abort(),6000);
+    const r=await fetch('data/prices.json',{cache:'no-cache',signal:ctl.signal});clearTimeout(tm);
+    if(!r.ok)return;const j=await r.json();if(j&&j.series&&Object.keys(j.series).length)REAL=j;
+  }catch(e){}
+}
+function realSeries(id){
+  const s=REAL&&REAL.series[id];if(!s)return null;
+  const rows=s.rows,n=rows.length,arr=()=>new Float64Array(n);
+  const d={t:rows.map(r=>Date.parse(r[0]+'T00:00:00Z')),o:arr(),h:arr(),l:arr(),c:arr(),source:s.source,symbol:s.symbol};
+  rows.forEach((r,i)=>{d.o[i]=r[1];d.h[i]=r[2];d.l[i]=r[3];d.c[i]=r[4]});return finalize(d);
+}
+let inst=COMMS[0], D=null;
+let style=store.get('style','candle'), showMa=store.get('ma',true), measureTool=false;
+const view={a:0,b:100}; let yMin=0,yMax=1,yT={min:0,max:1},yInit=false;
+let hover=null;            // index for crosshair
+let measure=null;          // {ia,ib,live}
+let mode='idle', anim=null, inertia=null, activeTf='6M';
+
+const $=id=>document.getElementById(id);
+const cv=$('cv'), ctx=cv.getContext('2d'), wrap=$('wrap');
+let W=0,H=0,dpr=1; const PAD={l:8,r:64,t:10,b:24};
+const plotW=()=>W-PAD.l-PAD.r, plotH=()=>H-PAD.t-PAD.b;
+const xOf=i=>PAD.l+(i-view.a)/(view.b-view.a)*plotW();
+const iOf=x=>view.a+(x-PAD.l)/plotW()*(view.b-view.a);
+const yOf=p=>PAD.t+(yMax-p)/(yMax-yMin)*plotH();
+const barAt=x=>Math.max(0,Math.min(D.n-1,Math.round(iOf(x))));
+
+let C={}; function readColors(){const s=getComputedStyle(document.documentElement);for(const k of['bg','surface','fg','muted','line','grid','accent','accent-soft','up','down'])C[k]=s.getPropertyValue('--'+k).trim();dirty()}
+
+// ---------- View helpers ----------
+function clampView(){
+  const n=D.n; let span=view.b-view.a;
+  span=Math.max(8,Math.min(span,n*1.15+10));
+  let a=view.a, b=a+span; const minA=-span*0.08, maxB=n-1+span*0.25;
+  let hit=false;
+  if(a<minA){a=minA;b=a+span;hit=true}
+  if(b>maxB){b=maxB;a=b-span;hit=true}
+  view.a=a;view.b=b; return hit;
+}
+function tfBars(tf){const n=D.n;if(tf==='YTD'){const y=new Date(D.t[n-1]).getUTCFullYear();let i=n-1;while(i>0&&new Date(D.t[i-1]).getUTCFullYear()===y)i--;return n-i}return({'1M':21,'3M':63,'6M':126,'1J':252,'3J':756,'Max':n})[tf]}
+function tfTarget(tf){const bars=Math.min(tfBars(tf),D.n);const b=D.n-0.5+Math.max(1,bars*0.04);return{a:b-bars-Math.max(1,bars*0.04),b}}
+function setTf(tf,instant){
+  activeTf=tf; renderTf();
+  const t=tfTarget(tf);
+  if(instant){view.a=t.a;view.b=t.b;clampView();computeY(true)}
+  else anim={a0:view.a,b0:view.b,a1:t.a,b1:t.b,t0:performance.now(),dur:380};
+  dirty();
+}
+function computeY(snap){
+  const i0=Math.max(0,Math.floor(view.a)),i1=Math.min(D.n-1,Math.ceil(view.b));
+  let mn=Infinity,mx=-Infinity;
+  const lineOnly=style==='line';
+  for(let i=i0;i<=i1;i++){const lo=lineOnly?D.c[i]:D.l[i],hi=lineOnly?D.c[i]:D.h[i];if(lo<mn)mn=lo;if(hi>mx)mx=hi}
+  if(!isFinite(mn)){mn=D.c[D.n-1];mx=mn}
+  const pad=(mx-mn)*0.08||mx*0.01; yT.min=mn-pad; yT.max=mx+pad*1.3;
+  if(snap||!yInit){yMin=yT.min;yMax=yT.max;yInit=true}
+}
+
+// ---------- Render loop ----------
+let needs=true, raf=0, lastT=0;
+function dirty(){needs=true;if(!raf)raf=requestAnimationFrame(frame)}
+function frame(ts){
+  raf=0; if(!D)return; const dt=lastT?Math.min(48,ts-lastT):16; lastT=ts; let more=false;
+  if(anim){const k=Math.min(1,(ts-anim.t0)/anim.dur),e=1-Math.pow(1-k,3);view.a=anim.a0+(anim.a1-anim.a0)*e;view.b=anim.b0+(anim.b1-anim.b0)*e;clampView();if(k>=1)anim=null;else more=true;needs=true}
+  if(inertia){const span=view.b-view.a;view.a+=inertia.v*dt;view.b+=inertia.v*dt;const hit=clampView();inertia.v*=Math.pow(0.93,dt/16);
+    if(hit||Math.abs(inertia.v)/span*plotW()<0.015)inertia=null;else more=true;needs=true}
+  if(needs){computeY(false)}
+  const k=1-Math.pow(0.6,dt/16);
+  const dy=Math.abs(yT.min-yMin)+Math.abs(yT.max-yMax);
+  if(dy>(yMax-yMin)*0.0005){yMin+=(yT.min-yMin)*k;yMax+=(yT.max-yMax)*k;more=true;needs=true}else{yMin=yT.min;yMax=yT.max}
+  if(needs){draw();needs=false}
+  if(more)raf=requestAnimationFrame(frame); else lastT=0;
+}
+
+function niceStep(raw){const p=Math.pow(10,Math.floor(Math.log10(raw)));const f=raw/p;return(f<1.5?1:f<3?2:f<7?5:10)*p}
+
+function draw(){
+  const pw=plotW(),ph=plotH(),n=D.n,dec=inst.dec;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle=C.surface;ctx.fillRect(0,0,W,H);
+  // grid + price axis
+  ctx.font='11px "IBM Plex Mono", ui-monospace, monospace';ctx.textBaseline='middle';
+  const step=niceStep((yMax-yMin)/Math.max(2,ph/48));
+  const decAx=Math.max(0,Math.min(dec,-Math.floor(Math.log10(step))+ (step/Math.pow(10,Math.floor(Math.log10(step)))===5?0:0)));
+  ctx.strokeStyle=C.grid;ctx.lineWidth=1;ctx.fillStyle=C.muted;ctx.textAlign='left';
+  for(let p=Math.ceil(yMin/step)*step;p<=yMax;p+=step){const y=Math.round(yOf(p))+.5;if(y<PAD.t||y>PAD.t+ph)continue;
+    ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+pw,y);ctx.stroke();ctx.fillText(fmt(p,decAx),PAD.l+pw+8,y)}
+  // time axis
+  const span=view.b-view.a, i0=Math.max(0,Math.floor(view.a)), i1=Math.min(n-1,Math.ceil(view.b));
+  const level=span<=35?'w':span<=170?'m':span<=520?'q':'y';
+  ctx.textAlign='center';ctx.textBaseline='alphabetic';let lastX=-1e9;
+  for(let i=Math.max(1,i0);i<=i1;i++){
+    const a=new Date(D.t[i-1]),b=new Date(D.t[i]);let lab=null,strong=false;
+    const newM=a.getUTCMonth()!==b.getUTCMonth(),newY=a.getUTCFullYear()!==b.getUTCFullYear();
+    if(level==='w'){if(b.getUTCDay()<a.getUTCDay()||newM){lab=dfDM.format(b)}}
+    else if(level==='m'){if(newM){lab=newY?String(b.getUTCFullYear()):dfM.format(b).replace('.','');strong=newY}}
+    else if(level==='q'){if(newM&&b.getUTCMonth()%3===0){lab=newY?String(b.getUTCFullYear()):dfM.format(b).replace('.','');strong=newY}}
+    else if(newY){lab=String(b.getUTCFullYear());strong=true}
+    if(!lab)continue;const x=xOf(i);if(x<PAD.l+14||x>PAD.l+pw-14||x-lastX<52)continue;lastX=x;
+    ctx.strokeStyle=C.grid;ctx.beginPath();ctx.moveTo(Math.round(x)+.5,PAD.t);ctx.lineTo(Math.round(x)+.5,PAD.t+ph);ctx.stroke();
+    ctx.fillStyle=strong?C.fg:C.muted;ctx.fillText(lab,x,H-7);
+  }
+  // series (clipped)
+  ctx.save();ctx.beginPath();ctx.rect(PAD.l,PAD.t,pw,ph);ctx.clip();
+  // measure band behind series
+  if(measure){const lo=Math.min(measure.ia,measure.ib),hi=Math.max(measure.ia,measure.ib);const x1=xOf(lo),x2=xOf(hi);
+    const up=D.c[hi]>=D.c[lo];ctx.fillStyle=up?hexA(C.up,.1):hexA(C.down,.1);ctx.fillRect(x1,PAD.t,x2-x1,ph)}
+  const bw=pw/span, j0=Math.max(0,i0-1), j1=Math.min(n-1,i1+1);
+  if(style==='candle'&&bw>=3){
+    const cw=Math.max(1,Math.min(bw*0.68,18));
+    for(let i=j0;i<=j1;i++){const x=xOf(i),o=D.o[i],c=D.c[i],up=c>=o;ctx.strokeStyle=ctx.fillStyle=up?C.up:C.down;
+      const xx=Math.round(x)+.5;ctx.beginPath();ctx.moveTo(xx,yOf(D.h[i]));ctx.lineTo(xx,yOf(D.l[i]));ctx.stroke();
+      const y1=yOf(Math.max(o,c)),y2=yOf(Math.min(o,c));ctx.fillRect(x-cw/2,y1,cw,Math.max(1,y2-y1))}
+  }else{
+    const first=D.c[j0],lastC=D.c[j1];const col=C.accent;
+    ctx.beginPath();for(let i=j0;i<=j1;i++){const x=xOf(i),y=yOf(D.c[i]);i===j0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
+    ctx.lineWidth=1.8;ctx.lineJoin='round';ctx.strokeStyle=col;ctx.stroke();
+    ctx.lineTo(xOf(j1),PAD.t+ph);ctx.lineTo(xOf(j0),PAD.t+ph);ctx.closePath();
+    const g=ctx.createLinearGradient(0,PAD.t,0,PAD.t+ph);g.addColorStop(0,hexA(col,.22));g.addColorStop(1,hexA(col,0));ctx.fillStyle=g;ctx.fill();
+  }
+  if(showMa){drawLine(D.ma50,j0,j1,hexA(C.fg,.55),1.2,[]);drawLine(D.ma200,j0,j1,hexA(C.fg,.55),1.2,[5,4])}
+  ctx.restore();
+  // last price line + tag
+  const lc=D.c[n-1],ly=yOf(lc),lup=lc>=D.c[n-2];
+  if(ly>=PAD.t&&ly<=PAD.t+ph){ctx.setLineDash([3,3]);ctx.strokeStyle=lup?C.up:C.down;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD.l,Math.round(ly)+.5);ctx.lineTo(PAD.l+pw,Math.round(ly)+.5);ctx.stroke();ctx.setLineDash([]);
+    tag(fmt(lc,dec),ly,lup?C.up:C.down,'#fff')}
+  // crosshair
+  if(hover!=null&&!(measure&&measure.live)){const x=xOf(hover),y=yOf(D.c[hover]);
+    ctx.strokeStyle=hexA(C.fg,.45);ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(Math.round(x)+.5,PAD.t);ctx.lineTo(Math.round(x)+.5,PAD.t+ph);ctx.moveTo(PAD.l,Math.round(y)+.5);ctx.lineTo(PAD.l+pw,Math.round(y)+.5);ctx.stroke();ctx.setLineDash([]);
+    dot(x,y,C.fg);tag(fmt(D.c[hover],dec),y,C.fg,C.surface);dateTag(D.t[hover],x)}
+  // measurement overlay
+  if(measure)drawMeasure();
+}
+function drawLine(arr,j0,j1,col,w,dash){ctx.beginPath();let on=false;for(let i=j0;i<=j1;i++){const v=arr[i];if(isNaN(v)){on=false;continue}const x=xOf(i),y=yOf(v);on?ctx.lineTo(x,y):ctx.moveTo(x,y);on=true}ctx.strokeStyle=col;ctx.lineWidth=w;ctx.setLineDash(dash);ctx.stroke();ctx.setLineDash([])}
+function hexA(c,a){if(c.startsWith('#')){let h=c.slice(1);if(h.length===3)h=h.split('').map(x=>x+x).join('');const v=parseInt(h,16);return`rgba(${v>>16&255},${v>>8&255},${v&255},${a})`}return c}
+function dot(x,y,col,r=4){ctx.beginPath();ctx.arc(x,y,r+2,0,7);ctx.fillStyle=C.surface;ctx.fill();ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fillStyle=col;ctx.fill()}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function tag(txt,y,bg,fg){ctx.font='600 11px "IBM Plex Mono", ui-monospace, monospace';const w=PAD.r-4;const yy=Math.max(PAD.t+9,Math.min(PAD.t+plotH()-9,y));
+  rr(PAD.l+plotW()+2,yy-9,w,18,4);ctx.fillStyle=bg;ctx.fill();ctx.fillStyle=fg;ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(txt,PAD.l+plotW()+6,yy+.5)}
+function dateTag(t,x){ctx.font='600 11px "IBM Plex Mono", ui-monospace, monospace';const s=dfFull.format(t);const w=ctx.measureText(s).width+12;const xx=Math.max(PAD.l,Math.min(PAD.l+plotW()-w,x-w/2));
+  rr(xx,H-PAD.b+2,w,19,4);ctx.fillStyle=C.fg;ctx.fill();ctx.fillStyle=C.surface;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(s,xx+w/2,H-PAD.b+12)}
+function drawMeasure(){
+  const lo=Math.min(measure.ia,measure.ib),hi=Math.max(measure.ia,measure.ib);
+  const xa=xOf(lo),xb=xOf(hi),ya=yOf(D.c[lo]),yb=yOf(D.c[hi]);const ch=D.c[hi]/D.c[lo]-1;const col=ch>=0?C.up:C.down;
+  ctx.strokeStyle=col;ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(Math.round(xa)+.5,PAD.t);ctx.lineTo(Math.round(xa)+.5,PAD.t+plotH());ctx.moveTo(Math.round(xb)+.5,PAD.t);ctx.lineTo(Math.round(xb)+.5,PAD.t+plotH());ctx.stroke();
+  ctx.setLineDash([5,4]);ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(xa,ya);ctx.lineTo(xb,yb);ctx.stroke();ctx.setLineDash([]);
+  dot(xa,ya,col,4.5);dot(xb,yb,col,4.5);
+  // bubble
+  ctx.font='600 15px "IBM Plex Mono", ui-monospace, monospace';
+  const txt=pct(ch),sub=(hi-lo)+' Handelstage';
+  const w=Math.max(ctx.measureText(txt).width,80)+20;
+  ctx.font='11px "IBM Plex Mono", ui-monospace, monospace';
+  const w2=Math.max(w,ctx.measureText(sub).width+20);
+  const bx=Math.max(PAD.l+4,Math.min(PAD.l+plotW()-w2-4,(xa+xb)/2-w2/2)),by=PAD.t+6;
+  rr(bx,by,w2,42,8);ctx.fillStyle=col;ctx.fill();
+  ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.font='600 15px "IBM Plex Mono", ui-monospace, monospace';ctx.fillText(txt,bx+w2/2,by+15);
+  ctx.font='11px "IBM Plex Mono", ui-monospace, monospace';ctx.globalAlpha=.9;ctx.fillText(sub,bx+w2/2,by+32);ctx.globalAlpha=1;
+  tag(fmt(D.c[lo],inst.dec),ya,col,'#fff');tag(fmt(D.c[hi],inst.dec),yb,col,'#fff');
+}
+
+// ---------- Legend ----------
+let legendKey='';
+function updateLegend(){
+  const L=$('legend'),dec=inst.dec,u=inst.q;
+  if(measure){
+    const lo=Math.min(measure.ia,measure.ib),hi=Math.max(measure.ia,measure.ib);
+    const a=D.c[lo],b=D.c[hi],ch=b/a-1;let mx=-Infinity,mn=Infinity;for(let i=lo;i<=hi;i++){if(D.h[i]>mx)mx=D.h[i];if(D.l[i]<mn)mn=D.l[i]}
+    const days=Math.round((D.t[hi]-D.t[lo])/864e5);
+    const key='m'+lo+'_'+hi;if(key===legendKey)return;legendKey=key;
+    L.className='legend measure';
+    L.innerHTML=`<span class="big num ${cls(ch)}">${pct(ch)}</span>
+      <span class="num ${cls(ch)}">${sgn(b-a,dec)} ${u}</span>
+      <span class="num">${dfFull.format(D.t[lo])} → ${dfFull.format(D.t[hi])}</span>
+      <span>${days} Tage · ${hi-lo} Handelstage</span>
+      <span class="num">Hoch <b>${fmt(mx,dec)}</b> · Tief <b>${fmt(mn,dec)}</b></span>
+      <span class="num">${fmt(a,dec)} → ${fmt(b,dec)}</span>`;
+    return;
+  }
+  const i=hover!=null?hover:D.n-1;
+  const key=(mode==='scrub'?'s':'h')+i;if(key===legendKey)return;legendKey=key;
+  L.className='legend';
+  const prev=i>0?D.c[i-1]:D.o[i],ch=D.c[i]/prev-1;
+  L.innerHTML=`<span class="num"><b>${dfFull.format(D.t[i])}</b></span>
+    <span class="num">E <b>${fmt(D.o[i],dec)}</b></span><span class="num">H <b>${fmt(D.h[i],dec)}</b></span>
+    <span class="num">T <b>${fmt(D.l[i],dec)}</b></span><span class="num">S <b>${fmt(D.c[i],dec)}</b></span>
+    <span class="num ${cls(ch)}">${pct(ch)}</span>`+(mode==='scrub'?'<span style="color:var(--accent)">Jetzt zweiten Finger auf den Chart setzen</span>':'');
+}
+const _draw=draw; draw=function(){_draw();updateLegend()};
+
+// ---------- Gestures ----------
+const ptrs=new Map(); let order=[], pressTimer=0, pan0=null, pinch0=null, samples=[], f1=null, f2=null, measureStart=null;
+const local=e=>{const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}};
+function buzz(){try{navigator.vibrate&&navigator.vibrate(12)}catch(e){}}
+function stopMotion(){inertia=null;anim=null}
+function startPan(p){mode='pan';pan0={x:p.x,a:view.a,b:view.b};samples=[{t:performance.now(),x:p.x}]}
+function clearTfIfMoved(){if(activeTf){activeTf=null;renderTf()}}
+
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('pointerdown',e=>{
+  if(!D||(e.pointerType==='mouse'&&e.button!==0))return;
+  try{cv.setPointerCapture(e.pointerId)}catch(_){}
+  const p=local(e); ptrs.set(e.pointerId,{...p,x0:p.x,y0:p.y}); order.push(e.pointerId);
+  stopMotion();
+  if(ptrs.size===1){
+    if(measureTool||e.shiftKey){mode='mdrag';measureStart=barAt(p.x);measure={ia:measureStart,ib:measureStart,live:true};hover=null;dirty();return}
+    mode='press';pan0={x:p.x,a:view.a,b:view.b};samples=[{t:performance.now(),x:p.x}];
+    clearTimeout(pressTimer);
+    pressTimer=setTimeout(()=>{if(mode!=='press')return;mode='scrub';f1=e.pointerId;measure=null;const q=ptrs.get(f1);hover=barAt(q.x);buzz();dirty()},300);
+  }else if(ptrs.size===2){
+    clearTimeout(pressTimer);
+    if(mode==='scrub'){
+      mode='measure';f2=e.pointerId;const a=ptrs.get(f1);measure={ia:barAt(a.x),ib:barAt(p.x),live:true};hover=null;buzz();dirty();
+    }else if(mode==='press'||mode==='pan'||mode==='idle'){
+      mode='pinch';const [A,B]=order.slice(-2).map(id=>ptrs.get(id));
+      const d0=Math.max(40,Math.abs(A.x-B.x)),m0=(A.x+B.x)/2;
+      pinch0={d0,idx:iOf(m0),span:view.b-view.a};clearTfIfMoved();
+    }
+  }
+});
+cv.addEventListener('pointermove',e=>{
+  const p=local(e);
+  if(!ptrs.has(e.pointerId)){ if(e.pointerType==='mouse'&&ptrs.size===0&&D){hover=barAt(p.x);dirty()} return }
+  const q=ptrs.get(e.pointerId); q.x=p.x;q.y=p.y;
+  if(mode==='press'){if(Math.hypot(p.x-q.x0,p.y-q.y0)>7){clearTimeout(pressTimer);startPan({x:q.x0});clearTfIfMoved()}}
+  if(mode==='pan'){const span=pan0.b-pan0.a,sh=-(p.x-pan0.x)/plotW()*span;view.a=pan0.a+sh;view.b=pan0.b+sh;clampView();
+    const now=performance.now();samples.push({t:now,x:p.x});while(samples.length>2&&now-samples[0].t>90)samples.shift();if(e.pointerType==='mouse')hover=null;dirty()}
+  else if(mode==='pinch'){const ids=[...ptrs.keys()];if(ids.length<2)return;const A=ptrs.get(ids[0]),B=ptrs.get(ids[1]);
+    const d=Math.max(40,Math.abs(A.x-B.x)),m=(A.x+B.x)/2;let span=pinch0.span*pinch0.d0/d;span=Math.max(8,Math.min(span,D.n*1.15+10));
+    view.a=pinch0.idx-(m-PAD.l)/plotW()*span;view.b=view.a+span;clampView();dirty()}
+  else if(mode==='scrub'){if(e.pointerId===f1){hover=barAt(p.x);dirty()}}
+  else if(mode==='measure'){const i=barAt(p.x);if(e.pointerId===f1)measure.ia=i;else if(e.pointerId===f2)measure.ib=i;dirty()}
+  else if(mode==='mdrag'){measure.ib=barAt(p.x);dirty()}
+});
+function endPtr(e){
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.delete(e.pointerId);order=order.filter(id=>id!==e.pointerId);
+  if(mode==='press'){clearTimeout(pressTimer);mode='idle';if(measure){measure=null;legendKey=''}if(e.pointerType!=='mouse')hover=null}
+  else if(mode==='pan'){mode='idle';
+    if(samples.length>=2){const s0=samples[0],s1=samples[samples.length-1],dt=s1.t-s0.t;
+      if(dt>0&&performance.now()-s1.t<60){const vpx=(s1.x-s0.x)/dt;const v=-vpx/plotW()*(view.b-view.a);if(Math.abs(vpx)>0.15){inertia={v};}}}}
+  else if(mode==='pinch'){if(ptrs.size===1){const [id]=ptrs.keys();startPan(ptrs.get(id))}else if(!ptrs.size)mode='idle'}
+  else if(mode==='scrub'){if(!ptrs.size){mode='idle';hover=null}}
+  else if(mode==='measure'){measure.live=false;
+    if(e.pointerId===f2&&ptrs.size===1){mode='scrub';hover=barAt(ptrs.get(f1).x)}
+    else{mode=ptrs.size?'done':'idle';hover=null}
+    if(measure.ia===measure.ib)measure=null}
+  else if(mode==='mdrag'){measure.live=false;mode='idle';if(measure.ia===measure.ib)measure=null}
+  else if(mode==='done'){if(!ptrs.size)mode='idle'}
+  legendKey='';dirty();
+}
+cv.addEventListener('pointerup',endPtr);cv.addEventListener('pointercancel',endPtr);
+cv.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse'&&!ptrs.size){hover=null;legendKey='';dirty()}});
+cv.addEventListener('wheel',e=>{e.preventDefault();if(!D)return;stopMotion();clearTfIfMoved();const p=local(e);const span=view.b-view.a;
+  if(Math.abs(e.deltaX)>Math.abs(e.deltaY)){const sh=e.deltaX/plotW()*span;view.a+=sh;view.b+=sh}
+  else{const f=Math.exp(e.deltaY*(e.ctrlKey?0.01:0.0018));const idx=iOf(p.x);let ns=Math.max(8,Math.min(span*f,D.n*1.15+10));view.a=idx-(idx-view.a)*ns/span;view.b=view.a+ns}
+  clampView();dirty()},{passive:false});
+window.addEventListener('keydown',e=>{if(e.target.closest&&e.target.closest('input'))return;const span=view.b-view.a;
+  if(e.key==='ArrowLeft'||e.key==='ArrowRight'){const sh=(e.key==='ArrowLeft'?-1:1)*span*0.1;anim={a0:view.a,b0:view.b,a1:view.a+sh,b1:view.b+sh,t0:performance.now(),dur:200};clearTfIfMoved();dirty()}
+  if(e.key==='Escape'&&measure){measure=null;legendKey='';dirty()}});
+
+// ---------- UI ----------
+function renderTabs(){const el=$('tabs');el.innerHTML='';const list=cache.custom?[...COMMS,cache.custom.inst]:COMMS;
+  for(const c of list){const b=document.createElement('button');b.className='chip';b.textContent=c.name;b.setAttribute('aria-pressed',c.id===inst.id);b.onclick=()=>select(c.id);el.appendChild(b)}}
+function renderTf(){const el=$('tf');el.innerHTML='';for(const tf of['1M','3M','6M','YTD','1J','3J','Max']){const b=document.createElement('button');b.textContent=tf;b.setAttribute('aria-pressed',tf===activeTf);b.onclick=()=>setTf(tf);el.appendChild(b)}}
+function renderToggles(){$('bLine').setAttribute('aria-pressed',style==='line');$('bCandle').setAttribute('aria-pressed',style==='candle');$('bMa').setAttribute('aria-pressed',showMa);
+  $('bMeasure').setAttribute('aria-pressed',measureTool);$('bMeasure').classList.toggle('measure-on',measureTool);cv.style.cursor=measureTool?'ew-resize':'crosshair'}
+$('bLine').onclick=()=>{style='line';store.set('style',style);renderToggles();computeY(true);dirty()};
+$('bCandle').onclick=()=>{style='candle';store.set('style',style);renderToggles();computeY(true);dirty()};
+$('bMa').onclick=()=>{showMa=!showMa;store.set('ma',showMa);renderToggles();dirty()};
+$('bMeasure').onclick=()=>{measureTool=!measureTool;renderToggles()};
+
+function select(id){
+  if(id==='custom'){inst=cache.custom.inst;D=cache.custom.D}
+  else{inst=COMMS.find(c=>c.id===id);D=cache[id]||(cache[id]=realSeries(id)||genSeries(inst,COMMS.indexOf(inst)))}
+  store.set('inst',id);measure=null;hover=null;legendKey='';stopMotion();
+  renderTabs();renderQuote();renderStats();setTf(activeTf||'6M',true);
+  const real=!!D.source;
+  $('badge').textContent=id==='custom'?'Eigene Daten':real?'Echte Kurse':'Beispieldaten';
+  $('noteText').innerHTML=real
+    ?`<strong>Daten:</strong> Tageskurse des Front-Monat-Futures (${esc(D.symbol)}) von ${esc(D.source)}, automatisch aktualisiert am ${dfFull.format(Date.parse(REAL.updated))}. Beim Wechsel auf den nächsten Kontraktmonat kann der Kurs springen. Kurse können verzögert sein, keine Anlageberatung. Du kannst zusätzlich eigene Kurse als CSV laden.`
+    :NOTE_SAMPLE;
+}
+function renderQuote(){const n=D.n,c=D.c[n-1],p=D.c[n-2],ch=c/p-1;
+  $('qName').textContent=inst.name;
+  $('qMeta').textContent=(inst.sym?inst.sym+' · '+inst.ex+' · ':'')+inst.unit+' · Stand '+dfFull.format(D.t[n-1]);
+  $('qPrice').textContent=fmt(c,inst.dec);
+  const q=$('qChg');q.className='chg num '+cls(ch);q.textContent=sgn(c-p,inst.dec)+'  ('+pct(ch)+')';
+}
+function stat(label,val,sub,valCls='',extra=''){return`<div class="stat"><small>${label}</small><div class="num ${valCls}">${val}</div>${sub?`<div class="sub">${sub}</div>`:''}${extra}</div>`}
+function renderStats(){
+  const n=D.n,c=D.c,last=c[n-1],dec=inst.dec,u=inst.q;
+  const back=k=>n-1-k>=0?last/c[n-1-k]-1:NaN;
+  const ytd=(()=>{const y=new Date(D.t[n-1]).getUTCFullYear();for(let i=n-1;i>0;i--)if(new Date(D.t[i-1]).getUTCFullYear()<y)return last/c[i-1]-1;return NaN})();
+  const perf=[['1 Woche',back(5)],['1 Monat',back(21)],['3 Monate',back(63)],['YTD',ytd],['1 Jahr',back(252)],['3 Jahre',back(756)]];
+  $('perf').innerHTML=perf.map(([l,v])=>`<div><small>${l}</small><span class="num ${cls(v)}">${isNaN(v)?'–':pct(v,1)}</span></div>`).join('');
+  const w=Math.min(252,n);let hi=-Infinity,lo=Infinity;for(let i=n-w;i<n;i++){if(D.h[i]>hi)hi=D.h[i];if(D.l[i]<lo)lo=D.l[i]}
+  const pos=(last-lo)/(hi-lo||1);
+  const lr=[];for(let i=Math.max(1,n-30);i<n;i++)lr.push(Math.log(c[i]/c[i-1]));const m=lr.reduce((a,b)=>a+b,0)/lr.length;
+  const vol=Math.sqrt(lr.reduce((a,b)=>a+(b-m)**2,0)/(lr.length-1))*Math.sqrt(252);
+  let atr=0;{const p=14;let tr=[];for(let i=1;i<n;i++)tr.push(Math.max(D.h[i]-D.l[i],Math.abs(D.h[i]-c[i-1]),Math.abs(D.l[i]-c[i-1])));atr=tr.slice(0,p).reduce((a,b)=>a+b,0)/p;for(let i=p;i<tr.length;i++)atr=(atr*(p-1)+tr[i])/p}
+  let rsi;{const p=14;let g=0,l=0;for(let i=1;i<=p;i++){const d=c[i]-c[i-1];d>0?g+=d:l-=d}g/=p;l/=p;for(let i=p+1;i<n;i++){const d=c[i]-c[i-1];g=(g*(p-1)+Math.max(d,0))/p;l=(l*(p-1)+Math.max(-d,0))/p}rsi=l===0?100:100-100/(1+g/l)}
+  let dd=0,peak=-Infinity;for(let i=n-w;i<n;i++){if(c[i]>peak)peak=c[i];dd=Math.min(dd,c[i]/peak-1)}
+  const m50=D.ma50[n-1],m200=D.ma200[n-1];
+  const mult=inst.cents?inst.size/100:inst.size;
+  const rsiTxt=rsi>=70?'überkauft':rsi<=30?'überverkauft':'neutral';
+  $('stats').innerHTML=[
+    stat('52W Hoch',fmt(hi,dec),pct(last/hi-1,1)+' vom Hoch'),
+    stat('52W Tief',fmt(lo,dec),pct(last/lo-1,1)+' vom Tief'),
+    stat('52W Spanne',fmt(pos*100,0)+' %','Position im Jahresbereich','',`<div class="meter" aria-hidden="true"><i style="left:calc(${(pos*100).toFixed(1)}% - 1.5px)"></i></div>`),
+    stat('Volatilität 30T',fmt(vol*100,1)+' %','annualisiert'),
+    stat('ATR 14',fmt(atr,dec),u==='USc'?fmt(atr*mult,0)+' USD je Kontrakt':fmt(atr*mult,0)+' USD je Kontrakt'),
+    stat('RSI 14',fmt(rsi,1),rsiTxt,rsi>=70?'down':rsi<=30?'up':''),
+    stat('Abstand MA 50',isNaN(m50)?'–':pct(last/m50-1,1),isNaN(m50)?'':'MA '+fmt(m50,dec),isNaN(m50)?'':cls(last-m50)),
+    stat('Abstand MA 200',isNaN(m200)?'–':pct(last/m200-1,1),isNaN(m200)?'':'MA '+fmt(m200,dec),isNaN(m200)?'':cls(last-m200)),
+    stat('Max. Drawdown 1J',pct(dd,1),'größter Rückgang vom Hoch','down'),
+    (()=>{const t=isNaN(m200)?null:(last>m50&&m50>m200)?['Aufwärts','up','Kurs > MA 50 > MA 200']:(last<m50&&m50<m200)?['Abwärts','down','Kurs < MA 50 < MA 200']:['Seitwärts','','MA-Signale gemischt'];return t?stat('Trend',t[0],t[2],t[1]):stat('Trend','–','zu wenig Daten')})(),
+  ].join('');
+  if(inst.size){
+    $('contract').innerHTML=[
+      stat('Symbol / Börse',esc(inst.sym)+' · '+esc(inst.ex),'Future, Front-Monat'),
+      stat('Kontraktgröße',fmt(inst.size,0)+' '+esc(inst.sizeU),esc(inst.unit)),
+      stat('Tick',fmt(inst.tick,inst.tick<0.01?4:inst.tick<1?3:2).replace(/0+$/,'').replace(/,$/,''),'= '+fmt(inst.tickV,2)+' USD'),
+      stat('Kontraktwert',fmt(last*mult,0)+' USD','beim letzten Kurs'),
+      stat('1 % Bewegung',fmt(last*mult*0.01,0)+' USD','je Kontrakt'),
+      stat('Punktwert',fmt(mult,mult<100?2:0)+' USD',inst.cents?'je 1 US-Cent Bewegung':'je 1 USD Bewegung'),
+    ].join('');
+  }else $('contract').innerHTML=stat('Kontrakt','–','Für eigene Daten keine Kontraktangaben');
+}
+
+// ---------- CSV import ----------
+function splitCSV(line,d){const out=[];let cur='',q=false;for(let i=0;i<line.length;i++){const ch=line[i];if(ch==='"'){q=!q;continue}if(ch===d&&!q){out.push(cur);cur='';continue}cur+=ch}out.push(cur);return out.map(s=>s.trim())}
+function parseDate(s){s=s.trim();let m;
+  if(m=s.match(/^(\d{4})-(\d{2})-(\d{2})/))return Date.UTC(+m[1],m[2]-1,+m[3]);
+  if(m=s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})/))return Date.UTC(m[3].length===2?2000+ +m[3]:+m[3],m[2]-1,+m[1]);
+  if(m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/))return Date.UTC(+m[3],m[1]-1,+m[2]);
+  const t=Date.parse(s);return isNaN(t)?NaN:t}
+function parseCSV(text){
+  const lines=text.replace(/^﻿/,'').trim().split(/\r?\n/).filter(Boolean);if(lines.length<20)throw new Error('Zu wenige Zeilen. Es werden mindestens 20 Tageskurse gebraucht.');
+  const h0=lines[0];const d=(h0.match(/;/g)||[]).length>(h0.match(/,/g)||[]).length?';':(h0.includes('\t')?'\t':',');
+  const head=splitCSV(h0,d).map(s=>s.toLowerCase());
+  const find=(...ns)=>{for(const nm of ns){const i=head.findIndex(h=>h===nm);if(i>=0)return i}for(const nm of ns){const i=head.findIndex(h=>h.startsWith(nm));if(i>=0)return i}return -1};
+  const di=find('date','datum','time','zeit'),ci=find('close','schluss','schlusskurs','zuletzt','price','kurs','adj close');
+  if(di<0||ci<0)throw new Error('Spalten für Datum und Schlusskurs nicht gefunden. Erwartet z. B. "Date, Open, High, Low, Close".');
+  const oi=find('open','eröffnung','eröffnung','eroeffnung'),hi=find('high','hoch'),li=find('low','tief');
+  const num=s=>{if(s==null)return NaN;s=s.replace(/[^\d.,\-]/g,'');if(d===';'||/^\-?\d{1,3}(\.\d{3})*,\d+$/.test(s))s=s.replace(/\./g,'').replace(',','.');else s=s.replace(/,/g,'');return parseFloat(s)};
+  const rows=[];for(let k=1;k<lines.length;k++){const f=splitCSV(lines[k],d);const t=parseDate(f[di]||''),c=num(f[ci]);if(isNaN(t)||!(c>0))continue;
+    const o=oi>=0?num(f[oi]):c,h=hi>=0?num(f[hi]):c,l=li>=0?num(f[li]):c;rows.push([t,o>0?o:c,Math.max(h>0?h:c,c,o||c),Math.min(l>0?l:c,c,o||c),c])}
+  rows.sort((a,b)=>a[0]-b[0]);if(rows.length<20)throw new Error('Zu wenige gültige Zeilen erkannt.');
+  const n=rows.length,arr=()=>new Float64Array(n);const D2={t:rows.map(r=>r[0]),o:arr(),h:arr(),l:arr(),c:arr()};
+  rows.forEach((r,i)=>{D2.o[i]=r[1];D2.h[i]=r[2];D2.l[i]=r[3];D2.c[i]=r[4]});return finalize(D2);
+}
+$('csv').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{const msg=$('csvMsg');try{const D2=parseCSV(String(r.result));const last=D2.c[D2.n-1];
+      const dec=last>=1000?2:last>=10?2:last>=1?3:4;
+      const name=f.name.replace(/\.[^.]+$/,'').slice(0,24)||'Eigene Daten';
+      cache.custom={inst:{id:'custom',name,sym:'',ex:'',unit:'eigene Daten',q:'',dec,size:0},D:D2};
+      msg.className='';msg.textContent=`${D2.n} Tageskurse aus „${f.name}“ geladen.`;select('custom')}
+    catch(err){msg.className='err';msg.textContent=err.message}};
+  r.readAsText(f);e.target.value=''});
+
+// ---------- Boot ----------
+function resize(){const r=wrap.getBoundingClientRect();dpr=Math.min(3,window.devicePixelRatio||1);W=r.width;H=r.height;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);dirty()}
+new ResizeObserver(resize).observe(wrap);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',readColors);
+new MutationObserver(readColors).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+readColors();renderTf();renderToggles();
+const NOTE_SAMPLE=$('noteText').innerHTML;
+const startId=store.get('inst','gold');
+loadReal().then(()=>{select(COMMS.some(c=>c.id===startId)?startId:'gold');resize()});
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(dirty);
+// test hook
+window.__rc={view,get measure(){return measure},get mode(){return mode},get hover(){return hover}};
+})();
+</script>
+
+</body>
+</html>
